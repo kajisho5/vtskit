@@ -164,26 +164,41 @@ class TestAgainstSpumux(unittest.TestCase):
         # the vtskit-muxed stream authored by both: the navigation packs point
         # at the units the same way (the palette is given to both: spumux's
         # colour list is a padding packet vtskit does not write)
+        self.same_titleset(self.mine, "dvd", 'aspect="4:3"')
+
+    def test_widescreen_titleset_as_dvdauthor(self):
+        # a 16:9 picture: the program chain names each subpicture stream for
+        # the wide, letterboxed and pan-scanned displays
+        wide = os.path.join(self.tmp, "wide.mpg")
+        encode(wide, seconds=8, aspect="16:9")
+        data = subtitles.mux(read(wide), self.vcues)
+        self.same_titleset(data, "dvdwide", 'aspect="16:9"')
+        self.same_titleset(data, "dvdwidenops", 'aspect="16:9" widescreen="nopanscan"', pan_scan=False)
+        self.same_titleset(data, "dvdwidenolb", 'aspect="16:9" widescreen="noletterbox"', letterbox=False)
+
+    def same_titleset(self, data, name, video_attrs, **kw):
         t = self.tmp
-        mpg = os.path.join(t, "mine.mpg")
+        mpg = os.path.join(t, name + ".mpg")
         with open(mpg, "wb") as f:
-            f.write(self.mine)
-        out = os.path.join(t, "dvd")
-        with open(os.path.join(t, "dvd.xml"), "w") as f:
-            f.write(f'<dvdauthor dest="{out}"><vmgm/><titleset><titles><video format="ntsc" aspect="4:3"/>'
+            f.write(data)
+        out = os.path.join(t, name)
+        with open(out + ".xml", "w") as f:
+            f.write(f'<dvdauthor dest="{out}"><vmgm/><titleset><titles><video format="ntsc" {video_attrs}/>'
                     '<audio format="ac3" channels="2" lang="en"/><subpicture lang="en"/><subpicture lang="ja"/>'
                     f'<pgc><vob file="{mpg}" chapters="0,3"/></pgc></titles></titleset></dvdauthor>')
-        subprocess.run(["dvdauthor", "-x", os.path.join(t, "dvd.xml")], check=True, capture_output=True,
+        subprocess.run(["dvdauthor", "-x", out + ".xml"], check=True, capture_output=True,
                        env={**os.environ, "VIDEO_FORMAT": "NTSC"})
-        mine = os.path.join(t, "vts")
+        mine = os.path.join(t, name + "-vts")
         titleset.write(mine, 1, [Title(mpg, (0, 3), (Audio("en", 2),), (Subpicture("en"), Subpicture("ja")),
-                                       palette=())])
+                                       palette=())], **kw)
         self.assertEqual(read(os.path.join(mine, "VTS_01_1.VOB")), read(os.path.join(out, "VIDEO_TS", "VTS_01_1.VOB")))
         a, b = read(os.path.join(mine, "VTS_01_0.IFO")), read(os.path.join(out, "VIDEO_TS", "VTS_01_0.IFO"))
         self.assertEqual(len(a), len(b))
         # (dvdauthor's palette without spumux's colour list: whatever it is, the rest the same)
         pgc = struct.unpack_from(">I", a, 0xCC)[0] * 2048 + 16
-        self.assertEqual(a[:pgc + 0xA4], b[:pgc + 0xA4])
+        if a[:pgc + 0xA4] != b[:pgc + 0xA4]:
+            at = next(k for k in range(pgc + 0xA4) if a[k] != b[k])
+            self.fail(f"IFO differs from dvdauthor's at {at:#x}: mine {a[at:at + 8].hex()} theirs {b[at:at + 8].hex()}")
         self.assertEqual(a[pgc + 0xE4:], b[pgc + 0xE4:])
 
     @unittest.skipUnless(LIBDVDNAV, "needs libdvdnav")

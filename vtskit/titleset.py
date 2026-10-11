@@ -301,10 +301,11 @@ def _still(seconds):
     return seconds
 
 
-def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=0):
+def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=0, video=None):
     """One program chain: `commands` = (pre, post, {chapter: command});
     `stills` {chapter: seconds or None} holds the picture at the chapter's
-    last cell's end."""
+    last cell's end. `video`: the domain's video attribute bytes, for the
+    subpicture streams of a 16:9 picture."""
     pre, post, cell_commands = commands
     cells = written.cells
     programs = written.programs or [1]
@@ -337,8 +338,20 @@ def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=
         for n, key in enumerate(written.stream.audio):
             number = key[1] & 7 if key[0] == 0xBD else key[0] & 7
             struct.pack_into(">H", head, 0x0C + 2 * n, 0x8000 | number << 8)
+        # a subpicture stream's entry names the stream for a 4:3 picture and,
+        # for a 16:9 one, the streams for a wide, a letterboxed and a
+        # pan-scanned display. dvdauthor writes the 4:3 field as available,
+        # stream 0, and the same stream for each 16:9 display the video
+        # attributes permit: `80 nn nn nn`, `80 nn nn 00` without pan-scan,
+        # `80 nn 00 nn` without letterbox; `8n 00 00 00` for a 4:3 picture
+        wide = video is not None and video[0] & 0x0C == 0x0C
         for n, sub in enumerate(subs):
-            struct.pack_into(">I", head, 0x1C + 4 * n, (0x80 | (sub - 0x20)) << 24)
+            k = sub - 0x20
+            if wide:
+                entry = 0x80 << 24 | k << 16 | (0 if video[0] & 0x01 else k) << 8 | (0 if video[0] & 0x02 else k)
+            else:
+                entry = (0x80 | k) << 24
+            struct.pack_into(">I", head, 0x1C + 4 * n, entry)
     head[0xA4:0xE4] = _palette(palette)
     table = struct.pack(">HHHH", len(pre), len(post), len(cell_list),
                         8 + 8 * (len(pre) + len(post) + len(cell_list)) - 1)
@@ -707,7 +720,7 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True, frame=
     for m, w in zip(menus, written):
         cat = (0x80 | menus_.ENTRY_TYPES[m.entry]) << 24 if m.entry else 0
         pgcs.append(_pgc((m.pre, m.post or (EXIT,), {}), w, frame, subs, menus_.palette(m), title=False,
-                         uops=m.uops))
+                         uops=m.uops, video=video_attr))
         cats.append(cat)
     flags = 0
     for k in kinds:
@@ -768,7 +781,7 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
                  [b"".join(struct.pack(">HH", w.number, k) for k in range(1, len(w.programs) + 1))
                   for w in written])
     pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, sorted(w.stream.subpictures), t.palette,
-                 stills=t.stills, uops=t.uops) for t, w in zip(titles, written)]
+                 stills=t.stills, uops=t.uops, video=video) for t, w in zip(titles, written)]
     pgci = struct.pack(">HHI", len(pgcs), 0, 0)
     o = 8 + 8 * len(pgcs)
     for w, p in zip(written, pgcs):

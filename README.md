@@ -128,7 +128,8 @@ information of every navigation pack and the IFOs' menu tables are
 dvdauthor's (its buttons made with spumux), and a menu's overlay in a
 normal colour is spumux's unit byte for byte; subtitles muxed by vtskit are
 spumux's units, placed where spumux places them, and the title written
-from that stream is dvdauthor's. A VIDEO_TS written by vtskit alone plays
+from that stream (4:3, and 16:9 with and without pan-scan or letterbox) is
+dvdauthor's. A VIDEO_TS written by vtskit alone plays
 its titles and chapters in order under libdvdnav, its commands jumping
 between titles, its menus' buttons lead where they say, and its jumps into
 another titleset's chapters land; a title with an angle block plays and
