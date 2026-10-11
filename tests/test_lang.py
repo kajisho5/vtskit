@@ -341,6 +341,64 @@ class TestAgainstDvdauthor(unittest.TestCase):
         self.assertEqual(struct.unpack_from(">I", a, 0xC0)[0], struct.unpack_from(">I", a, 0x1C)[0] + 1)
 
 
+@unittest.skipUnless(TOOLS_OK, "needs ffmpeg, dvdauthor and spumux")
+class TestEntryMenusAgainstDvdauthor(unittest.TestCase):
+    """Menus of commands alone marked for the remote keys, by dvdauthor and
+    by vtskit: every kind, and domains whose menus name no root (title in
+    the VMG), where the first menu becomes it and its own kind links to it."""
+
+    TEXT = {"root": "g1 = 1; jump title 1;", "audio": "audio = 1; jump title 1;",
+            "subtitle": "subtitle = 64; jump title 1;", "angle": "angle = 1; jump title 1;",
+            "ptt": "g1 = 3; jump title 1;", "title": "g1 = 1; jump title 1;", None: "g1 = 9; jump title 1;"}
+    CASES = (["root", "audio", "subtitle", "angle"], ["audio"], ["subtitle", "angle"], [None, "audio"],
+             [None], ["audio", "root"], ["ptt"])
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="vtskit-entries-")
+        cls.mpg = os.path.join(cls.tmp, "a.mpg")
+        encode(cls.mpg, seconds=4)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def same(self, name, kinds, vmgm=False):
+        t = self.tmp
+        out = os.path.join(t, "dvd-" + name)
+        pgcs = "".join(f'<pgc{f" entry={chr(34)}{k}{chr(34)}" if k else ""}><pre>{self.TEXT[k]}</pre></pgc>'
+                       for k in kinds)
+        menus = f'<menus><video format="ntsc" aspect="4:3"/>{pgcs}</menus>'
+        with open(out + ".xml", "w") as f:
+            f.write(f'<dvdauthor dest="{out}">{"<vmgm>" + menus + "</vmgm><titleset>" if vmgm else "<vmgm/><titleset>" + menus}'
+                    f'<titles><video format="ntsc" aspect="4:3"/><audio lang="en"/>'
+                    f'<pgc><vob file="{self.mpg}"/></pgc></titles></titleset></dvdauthor>')
+        subprocess.run(["dvdauthor", "-x", out + ".xml"], check=True, capture_output=True,
+                       env={**os.environ, "VIDEO_FORMAT": "NTSC"})
+        d = Disc({(1, 1): 1}, Menus(len(kinds), {}) if vmgm else None,
+                 {1: Menus(len(kinds), {k: n for n, k in enumerate(kinds, 1) if k})})
+        mine = os.path.join(t, "mine-" + name)
+        domain = "vmgm" if vmgm else "vtsm"
+        ms = [Menu(None, pre=d.compile(self.TEXT[k], domain, 1), entry="subpicture" if k == "subtitle" else k)
+              for k in kinds]
+        ts = titleset.write(mine, 1, [Title(self.mpg, audio=(Audio("en", 2),))], menus=[] if vmgm else ms)
+        vmg.write(mine, [ts], menus=ms if vmgm else [], provider="DVDAuthor 0.7.2")
+        for ifo in ("VTS_01_0.IFO", "VIDEO_TS.IFO"):
+            a, b = read(os.path.join(mine, ifo)), read(os.path.join(out, "VIDEO_TS", ifo))
+            if a != b:
+                at = next(k for k in range(min(len(a), len(b))) if a[k] != b[k])
+                self.fail(f"{name}: {ifo} differs at {at:#x}: mine {a[at:at + 8].hex()} theirs {b[at:at + 8].hex()}")
+
+    def test_titleset_menus(self):
+        for kinds in self.CASES:
+            with self.subTest(kinds=kinds):
+                self.same("-".join(k or "none" for k in kinds), kinds)
+
+    def test_vmgm_without_a_title_menu(self):
+        self.same("vmgm-none", [None], vmgm=True)
+        self.same("vmgm-title", ["title"], vmgm=True)
+
+
 @unittest.skipUnless(FFMPEG_OK and LIBDVDNAV, "needs ffmpeg and libdvdnav")
 class TestPadsUnderLibdvdnav(unittest.TestCase):
     """Jumps to a chapter of a title in another titleset: from the

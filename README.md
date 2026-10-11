@@ -87,7 +87,11 @@ oncemore writing its discs with vtskit.
   highlight information in every navigation pack, and the menu tables of
   the IFO. A menu without a stream is a program chain of commands alone, as
   dvdauthor writes a `<pgc>` without a `<vob>` (a title menu that only
-  jumps on, a titleset's root menu that only routes). A title may be
+  jumps on, a titleset's root menu that only routes). Menus answer the
+  remote keys they are marked for (root, audio, subpicture, angle, PTT);
+  as dvdauthor arranges it, a domain whose menus name no root menu makes
+  its first menu the root, and a titleset without a chapter menu gets one
+  that links to the first menu. A title may be
   several parts in a row, streams and `Angles` blocks of 2 to 9 streams: an
   angle block is interleaved on the disc, its navigation packs point from
   each unit to every angle's next, and its cells are marked as an angle
