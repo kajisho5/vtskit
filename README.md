@@ -41,9 +41,9 @@ field by field, and an angle block cannot be checked before the titleset
 around it is right.
 
 **Input:** the MPEG-2 program stream oncemore's encoder makes (ffmpeg
-`-f dvd`, 2048-byte packs, a navigation pack at every GOP with its PCI and
-DSI left empty). vtskit fills in the navigation packs and keeps every pack
-where it is.
+`-f dvd`, 2048-byte packs, a navigation pack at the start of every VOBU,
+one GOP in oncemore's streams, with its PCI and DSI left empty). vtskit
+fills in the navigation packs and keeps every pack where it is.
 
 **Clean implementation:** the DVD-Video specification itself is not public
 (it was licensed under NDA by DVD FLLC). vtskit is written from public
@@ -62,15 +62,24 @@ play the discs vtskit writes.
 
 ## What is here now
 
-Nothing is written yet. The first pieces are what the writer will be
-checked with:
+The first piece of the writer, and what it is checked with:
 
+* `vtskit.vob` fills the navigation packs of a title's program stream:
+  `scan` reads the stream's VOBUs, `cells_for` places chapters as dvdauthor
+  does, `write` copies the stream with every PCI and DSI filled (times,
+  reference frame ends, the search table, audio sync) and returns the cells
+  the IFO will describe. Angles, buttons and subpictures are not written yet.
+  `vtskit.nav` is the layout of the two packets, `vtskit.ps` reads the
+  stream.
 * `vtskit.ifo` reads where each chapter of each title starts, as a sector of
   the disc, from the IFO files.
 * `tests/dvdnav_sim.py` plays a disc with libdvdnav through ctypes: titles,
   chapters, menus and buttons, sound and subtitle tracks, and angles.
 
-The tests build a disc with ffmpeg and dvdauthor and check both against it
+The tests build discs with ffmpeg and dvdauthor and check against them: the
+VOB vtskit writes is compared byte for byte with dvdauthor's for the same
+stream (NTSC and PAL, chapters, B frames, several GOPs a VOBU, AC-3, MPEG
+and LPCM sound), and a disc whose VOB is vtskit's is played with libdvdnav
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
 it needs is missing).
 
