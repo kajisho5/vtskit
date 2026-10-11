@@ -14,12 +14,21 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 
 [oncemore](https://github.com/kajisho5/oncemore) から段階的に作り、各段階を同じ再生テストで確かめます。詳しい計画は [oncemore#75](https://github.com/kajisho5/oncemore/issues/75) にあります。
 
-1. **タイトルセットを書く処理**：VOB の配置（アングルブロックのインターリーブを含む）、ナビゲーションパック（PCI / DSI）、VTS の IFO を書きます。最初は、dvdauthor では作れないマルチアングルのタイトルに使います。
-2. **通常のタイトル**も同じ処理で書き、dvdauthor の出力と比べます。
+1. **タイトルセットを書く処理（まず通常のタイトル）**：VOB（1 GiB ごとに分割）、そのナビゲーションパック（PCI / DSI）、VTS の IFO と BUP を書き、同じタイトルを dvdauthor が書いたものと比べます。oncemore のタイトルが持つナビゲーション命令（pre・post・セル命令。言語ではなく数値で受け取る）を書く小さなエンコーダも含め、実際のディスクで dvdauthor のタイトルセットと置き換えられるようにします。
+2. **マルチアングルのタイトル**（dvdauthor では作れない）：アングルブロックのインターリーブと、それに合わせた VMG のタイトル表・タイトルセット属性。
 3. **メニュー、VMG、DVD のナビゲーション命令の変換器**を作ります。
 4. **oncemore から dvdauthor を外します。**
 
-**独自に実装します：** DVD-Video 形式の公開資料をもとに書き、dvdauthor・libdvdread・libdvdnav のソースは参考にしません。libdvdnav は、書き出したディスクを再生して確かめるテストにだけ使います。
+通常のタイトルを先にするのは、dvdauthor の出力と項目ごとに比べられるからです。周りのタイトルセットが正しくないうちは、アングルブロックを確かめられません。
+
+**入力：** oncemore のエンコーダが作る MPEG-2 プログラムストリーム（ffmpeg の `-f dvd`。2048 バイトのパックで、GOP ごとにナビゲーションパックがあり、その PCI と DSI は空）。vtskit はナビゲーションパックの中身を埋め、パックの位置は変えません。
+
+**独自に実装します：** DVD-Video の規格書そのものは公開されていません（DVD FLLC が秘密保持契約のもとでライセンスしていました）。vtskit は形式についての公開資料をもとに書きます。
+
+* [DVD-Video information](https://dvdnav.mplayerhq.hu/dvdinfo/)（IFO、PGC、PCI / DSI、命令セット。作者は規格書を見ずに書いたと明記）
+* [Inside DVD-Video](https://en.wikibooks.org/wiki/Inside_DVD-Video)（Wikibooks、CC BY-SA）
+
+資料に書かれていないことは、dvdauthor が書き出したバイト列を観察して決めます。dvdauthor・libdvdread・libdvdnav のソースは読みません。libdvdnav は、書き出したディスクを再生して確かめるテストにだけ、公開 API（`dvdnav.h` の関数宣言）を通して使います。
 
 ## 支援する
 
