@@ -166,6 +166,9 @@ class TestForms(unittest.TestCase):
                          ["7100000f00010000", "3006000300c00000"])
         self.assertEqual(hexes(self.d.compile("jump titleset 2 title 1;", "vtsm", 1)),
                          ["7100000f00020000", "3006000300c00000"])
+        # a title calls the pad chain (it cannot JumpSS); the same codes
+        self.assertEqual(hexes(self.d.compile("jump titleset 2 title 1 chapter 3;", "vts", 1)),
+                         ["7100000f00010000", "3008000301c00000"])
         pads = self.d.vmgm_pads()
         self.assertEqual(len(pads), 1)
         self.assertEqual(hexes(pads[0]), [
@@ -180,7 +183,7 @@ class TestForms(unittest.TestCase):
     def test_refused(self):
         for text, domain in (("jump title 1 chapter 2 extra;", "vts"), ("jump nowhere;", "vts"),
                              ("g1 = g2 + g3;", "vts"), ("call menu entry root;", "vtsm"),
-                             ("jump menu 1;", "vts"), ("jump titleset 2 title 1;", "vts"),
+                             ("jump menu 1;", "vts"), ("jump titleset 9 title 1;", "vts"),
                              ("if (1 == 2) exit;", "vts"), ("g1 = ;", "vts"), ("jump title 9;", "vmgm"),
                              ("jump menu entry audio;", "vtsm"), ("frobnicate;", "vts"), ("exit;", "nowhere")):
             with self.assertRaises(VtsError, msg=text):
@@ -360,8 +363,9 @@ class TestPadsUnderLibdvdnav(unittest.TestCase):
         title_pre = d.compile("if (g1 == 2000) { g1 = 0; jump titleset 2 title 1 chapter 2; } "
                               "jump titleset 1 menu entry root;", "vmgm")
         fp = d.compile("g1 = 2000; jump vmgm menu entry title;", "fp")
-        t1 = Title(b, audio=(Audio("en", 2),), post=d.compile("call vmgm menu entry title;", "vts", 1))
-        t2 = Title(a, (0, 2, 4), (Audio("en", 2),), post=d.compile("g1 = 0; call vmgm menu entry title;", "vts", 2))
+        # the titles jump into each other's titleset: t1 to a chapter of t2, t2 back to t1
+        t1 = Title(b, audio=(Audio("en", 2),), post=d.compile("jump titleset 2 title 1 chapter 2;", "vts", 1))
+        t2 = Title(a, (0, 2, 4), (Audio("en", 2),), post=d.compile("g1 = 0; jump titleset 1 title 1;", "vts", 2))
         cls.out = os.path.join(t, "dvd")
         # the pads come last: every command is compiled by now
         vmgm_menus = [Menu(None, pre=title_pre, entry="title")] + [Menu(None, pre=p) for p in d.vmgm_pads()]
@@ -379,10 +383,16 @@ class TestPadsUnderLibdvdnav(unittest.TestCase):
         with dvdnav_sim.DvdSim(self.out, LIBDVDNAV) as d:
             self.assertEqual(d.num_titles(), 2)
             self.assertEqual(d.wait_title(), (2, 2))         # first play: chapter 2 of titleset 2's title
-            self.assertEqual(d.play_to_end_of_title(), ("menu", 1))   # its post: the VMG, then the root menu
+            # the titles' posts: t2 calls the VMG pad, which JumpTTs to t1; t1
+            # calls it for chapter 2 of t2
+            self.assertEqual(d.play_to_end_of_title(), ("title", (1, 1)))
+            self.assertEqual(d.play_to_end_of_title(), ("title", (2, 2)))
+            d.menu_key()                                       # the root menu of titleset 1
+            self.assertEqual(d.wait_menu(), 1)
             self.assertEqual(d.domain(), "vtsm")
             d.activate(1)                                      # through the VMG pad to chapter 3
             self.assertEqual(d.wait_title(), (2, 3))
-            self.assertEqual(d.play_to_end_of_title(), ("menu", 1))
+            d.menu_key()
+            self.assertEqual(d.wait_menu(), 1)
             d.activate(2)                                      # the whole title, JumpTT from the pad
             self.assertEqual(d.wait_title(), (2, 1))

@@ -29,14 +29,15 @@ authored):
   sets GPRM 15 to its number and links to the end of the program chain,
   whose post commands start with a dispatcher (`g14 = g15; g15 = 0;` and a
   Goto per such button) and end with each button's code;
-* a jump to a chapter of a title in another titleset (dvdauthor's
-  "jumppad") cannot be one command: from the video manager it sets GPRM
-  15 to a code naming the title and chapter and jumps to the titleset's
-  chapter (PTT) menu, whose commands (`vts_pad`) decode it and
-  JumpVTS_PTT; from a titleset's menus it goes through a program chain of
-  the video manager's menus (`vmgm_pads`) that does the same, or JumpTT
-  for a whole title. GPRM 13 and 14 are the pads' scratch, as dvdauthor
-  keeps them; a disc using this language leaves GPRM 13 to 15 alone.
+* a jump into another titleset (dvdauthor's "jumppad") cannot be one
+  command: from the video manager a jump to a chapter sets GPRM 15 to a
+  code naming the title and chapter and jumps to the titleset's chapter
+  (PTT) menu, whose commands (`vts_pad`) decode it and JumpVTS_PTT; from a
+  titleset's menus or titles it goes through a program chain of the video
+  manager's menus (`vmgm_pads`) that does the same, or JumpTT for a whole
+  title (a menu jumps to that chain, a title calls it). GPRM 13 and 14 are
+  the pads' scratch, as dvdauthor keeps them; a disc using this language
+  leaves GPRM 13 to 15 alone.
 """
 
 import re
@@ -325,16 +326,15 @@ class Disc:
     def _to_title(self, vts, ttn, pttn, domain, here):
         """Instructions jumping to chapter `pttn` (0: the start) of title
         `ttn` of titleset `vts`, from `domain` (in titleset `here`)."""
-        if domain == "vts":
-            if vts != here:
-                raise VtsError("a title cannot jump to another titleset: call a menu of the video manager")
-            return [vm.jump_vts_ptt(ttn, pttn) if pttn else vm.jump_vts_tt(ttn)]
-        if domain == "vtsm":
+        if domain in ("vts", "vtsm"):
             if vts == here:
                 return [vm.jump_vts_ptt(ttn, pttn) if pttn else vm.jump_vts_tt(ttn)]
+            # another titleset: through a pad chain of the video manager (a
+            # title cannot JumpSS: it calls the chain, which jumps on)
             self._global(vts, ttn)
             code, pgcn = self._vmgm_pad((vts, ttn, pttn))
-            return [vm.set_gprm(CODE_REG, vm.MOV, code), vm.jump_ss_vmgm_pgc(pgcn)]
+            go = vm.jump_ss_vmgm_pgc(pgcn) if domain == "vtsm" else vm.call_ss_vmgm_pgc(pgcn)
+            return [vm.set_gprm(CODE_REG, vm.MOV, code), go]
         number = self._global(vts, ttn)
         if not pttn:
             return [vm.jump_tt(number)]
