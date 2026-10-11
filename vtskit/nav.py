@@ -145,21 +145,25 @@ def _audio_sync(stream, vs, pos, final):
     return out
 
 
-def _subpicture_sync(stream, vs, pos):
+def _subpicture_sync(stream, vs, pos, covered):
     """sp_synca of each VOBU: per subpicture stream (0-31), where the unit
     on screen during the VOBU is: in this VOBU, or nothing on screen
-    (7fffffff), or the offset to the VOBU it starts in."""
+    (7fffffff), or the offset to the VOBU it starts in. The unit on screen
+    is the last one shown before the VOBU ends and not gone before it
+    starts; a unit from before the VOBU's cell is not pointed at (a
+    player entering the cell has not read it), as dvdauthor writes them."""
     starts = [v.start for v in vs]
+    cell_start = {}
+    for i, cell in enumerate(covered):
+        cell_start.setdefault(cell, vs[i].start)
     out = [[0] * 32 for _ in vs]
     for sub, units in stream.subpictures.items():
         n = sub - 0x20
-        k = 0
         for i, (row, v) in enumerate(zip(out, vs)):
-            # (units are in order; skip those gone before this VOBU)
-            while k < len(units) and units[k][2] is not None and units[k][2] <= v.s_ptm:
-                k += 1
             val = 0x7FFFFFFF
-            for sector, shown, until in units[k:k + 2]:
+            for sector, shown, until in reversed(units):
+                if sector < cell_start[covered[i]]:
+                    break
                 if shown < v.e_ptm and (until is None or until > v.s_ptm):
                     home = pos[bisect.bisect_right(starts, sector) - 1]
                     if home > pos[i]:
@@ -214,7 +218,7 @@ def fill(data, cells, lbn=0, uops=0, stream=None, hli=None, layout=None, ilvu=No
         vob_e[cell[0]] = v.e_ptm
     times = [v.s_ptm for v in vs]
     sync = _audio_sync(stream, vs, pos, final)
-    spu = _subpicture_sync(stream, vs, pos)
+    spu = _subpicture_sync(stream, vs, pos, covered)
     for i, v in enumerate(vs):
         vob_id, cell_id, first, last = v.cell
         base = v.start * ps.SECTOR

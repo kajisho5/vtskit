@@ -69,8 +69,10 @@ def write(folder, titlesets, menus=(), first_play=None, language="en", provider=
 
     menu_written, menu_data, menu_tables, menu_attributes = [], [], None, bytes(0x100)
     if menus:
+        # (a video manager whose menus are commands alone: dvdauthor marks
+        # the picture format 0xFFF8)
         menu_written, menu_data, *menu_tables, menu_attributes = menu_domain(
-            menus, language, 0, pan_scan, letterbox)
+            menus, language, 0, pan_scan, letterbox, 3600 if pal else 3003, b"\xff\xf8")
     menu_sectors = sum(w.sectors for w in menu_written)
     if menu_sectors > VOB_FILE_SECTORS:
         raise VtsError("the VMG menus are larger than one VOB file")
@@ -148,7 +150,7 @@ def write(folder, titlesets, menus=(), first_play=None, language="en", provider=
     for name in ("VIDEO_TS.IFO", "VIDEO_TS.BUP"):
         with open(os.path.join(folder, name), "wb") as f:
             f.write(ifo)
-    if menus:
+    if menu_sectors:
         with open(os.path.join(folder, "VIDEO_TS.VOB"), "wb") as f:
             f.write(b"".join(menu_data))
     return start

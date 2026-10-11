@@ -109,7 +109,7 @@ class TestHighlight(unittest.TestCase):
         self.assertEqual(struct.unpack_from(">HIIIH", h, 0), (1, 48003, 0xFFFFFFFF, 0xFFFFFFFF, 0x1000))
         self.assertEqual(h[0x10:0x16], bytes((3, 2, 2, 0, 2, 0)))
         b2 = h[0x2E + 18:0x2E + 36]
-        self.assertEqual(b2[3] >> 7, 1)                       # auto action
+        self.assertEqual(b2[3] >> 4, 0x4)                     # auto action mode 01 (as dvdauthor writes <action>)
         self.assertEqual(b2[6:10], bytes((1, 1, 2, 2)))        # up, down; left and right itself
         self.assertEqual(b2[10:], vm.jump_vts_tt(2).encode())
         self.assertEqual(menu.hli(Menu("x"), 0), bytes(0x2B6))

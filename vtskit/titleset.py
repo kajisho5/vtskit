@@ -329,15 +329,16 @@ def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=
     if len(cells) > 255:
         raise VtsError(f"{len(cells)} cells (a program chain has at most 255)")
     head = bytearray(0xEC)
-    head[2], head[3] = len(programs), len(cells)
+    head[2], head[3] = len(programs) if cells else 0, len(cells)
     head[4:8] = nav.elapsed(sum(c.e_ptm - c.s_ptm for c in cells if c.angle <= 1), frame)
     struct.pack_into(">I", head, 8, uops)
     # streams: available, numbered as the VOB numbers them
-    for n, key in enumerate(written.stream.audio):
-        number = key[1] & 7 if key[0] == 0xBD else key[0] & 7
-        struct.pack_into(">H", head, 0x0C + 2 * n, 0x8000 | number << 8)
-    for n, sub in enumerate(subs):
-        struct.pack_into(">I", head, 0x1C + 4 * n, (0x80 | (sub - 0x20)) << 24)
+    if written.stream is not None:
+        for n, key in enumerate(written.stream.audio):
+            number = key[1] & 7 if key[0] == 0xBD else key[0] & 7
+            struct.pack_into(">H", head, 0x0C + 2 * n, 0x8000 | number << 8)
+        for n, sub in enumerate(subs):
+            struct.pack_into(">I", head, 0x1C + 4 * n, (0x80 | (sub - 0x20)) << 24)
     head[0xA4:0xE4] = _palette(palette)
     table = struct.pack(">HHHH", len(pre), len(post), len(cell_list),
                         8 + 8 * (len(pre) + len(post) + len(cell_list)) - 1)
@@ -356,8 +357,12 @@ def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=
                                 c.last_vobu_sector, c.last_sector)
     position = b"".join(struct.pack(">HBB", c.vob_id, 0, c.cell_id) for c in cells)
     o = len(head)
-    struct.pack_into(">HHHH", head, 0xE4, o, o + len(table), o + len(table) + len(program_map),
-                     o + len(table) + len(program_map) + len(playback))
+    if cells:
+        struct.pack_into(">HHHH", head, 0xE4, o, o + len(table), o + len(table) + len(program_map),
+                         o + len(table) + len(program_map) + len(playback))
+    else:                       # commands alone: no program map, no cells
+        struct.pack_into(">H", head, 0xE4, o)
+        program_map = b""
     return bytes(head) + table + program_map + playback + position
 
 
@@ -631,32 +636,42 @@ def _title(number, title, offset, vob_id):
 
 def _attributes(written, pan_scan, letterbox, audio, subpictures, what, captions=(False, False)):
     """(video attr, audio count, audio attrs, subpicture count, subpicture
-    attrs, sub-streams) of the first VOB; every other must agree."""
+    attrs, sub-streams) of the VOBs: the picture the same in every one, the
+    sound and subpicture streams those of the VOB with the most, of which
+    every other VOB has the first ones."""
     first = written[0].stream
     video = _video_attributes(first, pan_scan, letterbox, captions)
-    audio_count, audio_bytes = _audio_attributes(first, audio[0])
-    sp_count, sp_bytes, subs = _subpicture_attributes(first, subpictures[0])
-    for w, a, sp in zip(written[1:], audio[1:], subpictures[1:]):
+    audios = [_audio_attributes(w.stream, a) for w, a in zip(written, audio)]
+    sps = [_subpicture_attributes(w.stream, sp) for w, sp in zip(written, subpictures)]
+    audio_count, audio_bytes = max(audios, key=lambda x: x[0])
+    sp_count, sp_bytes, subs = max(sps, key=lambda x: x[0])
+    for w, (n, a), (m, sp, _) in zip(written[1:], audios[1:], sps[1:]):
         same = (w.stream.frame == first.frame
                 and _video_attributes(w.stream, pan_scan, letterbox, captions) == video
-                and _audio_attributes(w.stream, a) == (audio_count, audio_bytes)
-                and _subpicture_attributes(w.stream, sp)[:2] == (sp_count, sp_bytes))
+                and a[:8 * n] == audio_bytes[:8 * n] and sp[:6 * m] == sp_bytes[:6 * m])
         if not same:
             raise VtsError(f"{what} {w.number} differs in its streams from {what} 1 "
                            "(one titleset, one set of attributes)")
     return video, audio_count, audio_bytes, sp_count, sp_bytes, subs
 
 
-def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True):
+def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True, frame=None,
+                video=None):
     """The VOBs and tables of a menu domain (a titleset's or the VMG's):
     (written menus, their bytes, VTSM/VMGM_PGCI_UT, C_ADT, VOBU_ADMAP,
-    attributes (video, audio count, audio, subpicture count, subpictures))."""
+    attributes (video, audio count, audio, subpicture count, subpictures)).
+    `frame` (ticks a frame) and `video` (the 2 video attribute bytes) stand
+    in when no menu has a stream."""
     lang = _lang(language)
     written, data = [], []
-    hlis = []
     for n, m in enumerate(menus, 1):
         if not isinstance(m, menus_.Menu):
             raise VtsError(f"menu {n} is not a Menu")
+        if m.stream is None:
+            menus_.check(m, 1 << 12, 1 << 12)
+            written.append(WrittenTitle(n, 0, 0, offset, [], [], None, programs=[], chunks=[],
+                                        timeline=[], end=0, vobu_sectors=[]))
+            continue
         probe = None
         if m.buttons:
             with open(m.stream, "rb") as f:
@@ -665,7 +680,7 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True):
                 raise VtsError(f"menu {n}: the video has no sequence header")
             width, height = probe.sequence[0], probe.sequence[1]
             menus_.check(m, width, height)
-            unit = spu.encode(menus_.overlay(m, width, height))
+            unit = menus_.unit(m, width, height)
             s_ptm = nav.vobus(probe)[0].s_ptm
             hli = menus_.hli(m, s_ptm)
         else:
@@ -678,13 +693,20 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True):
     kinds = [m.entry for m in menus if m.entry]
     if len(kinds) != len(set(kinds)):
         raise VtsError("two menus answer the same key")
-    frame = written[0].stream.frame
-    video, audio_count, audio_bytes, sp_count, sp_bytes, subs = _attributes(
-        written, pan_scan, letterbox, [()] * len(menus), [()] * len(menus), "menu")
+    with_vob = [w for w in written if w.stream is not None]
+    if with_vob:
+        frame = with_vob[0].stream.frame
+        video_attr, audio_count, audio_bytes, sp_count, sp_bytes, subs = _attributes(
+            with_vob, pan_scan, letterbox, [()] * len(with_vob), [()] * len(with_vob), "menu")
+    else:
+        if frame is None or video is None:
+            raise VtsError("menus without streams: the frame rate and video attributes are needed")
+        video_attr, audio_count, audio_bytes, sp_count, sp_bytes, subs = \
+            video, 0, bytes(64), 0, bytes(192), []
     pgcs, cats = [], []
     for m, w in zip(menus, written):
         cat = (0x80 | menus_.ENTRY_TYPES[m.entry]) << 24 if m.entry else 0
-        pgcs.append(_pgc((m.pre, m.post, {}), w, frame, subs, menus_.palette(m), title=False,
+        pgcs.append(_pgc((m.pre, m.post or (EXIT,), {}), w, frame, subs, menus_.palette(m), title=False,
                          uops=m.uops))
         cats.append(cat)
     flags = 0
@@ -703,9 +725,9 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True):
     lu = lu[:4] + struct.pack(">I", o - 1) + lu[8:] + b"".join(pgcs)
     pgci_ut = struct.pack(">HHI", 1, 0, 8 + 8 + len(lu) - 1) + lang + bytes((0, flags)) \
         + struct.pack(">I", 16) + lu
-    c_adt, admap = _address_tables(written)
+    c_adt, admap = _address_tables(with_vob)
     attributes = bytearray(0x100)
-    attributes[0:2] = video
+    attributes[0:2] = video_attr
     struct.pack_into(">H", attributes, 2, audio_count)
     attributes[4:0x44] = audio_bytes
     struct.pack_into(">H", attributes, 0x54, sp_count)
@@ -725,12 +747,6 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
         raise VtsError(f"titleset {vts}: titlesets are numbered 1 to 99")
     if not titles or len(titles) > 99:
         raise VtsError("a titleset holds 1 to 99 titles")
-    menu_written, menu_data, menu_tables, menu_attributes = [], [], None, bytes(0x100)
-    if menus:
-        menu_written, menu_data, *menu_tables, menu_attributes = menu_domain(
-            menus, language, 0, pan_scan, letterbox)
-    menu_sectors = sum(w.sectors for w in menu_written)
-
     written = []
     offset, vob_id = 0, 1
     for n, title in enumerate(titles, 1):
@@ -740,13 +756,19 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
     video, audio_count, audio, sp_count, subpictures, subs = _attributes(
         written, pan_scan, letterbox, [t.audio for t in titles], [t.subpictures for t in titles],
         "title", captions)
+    menu_written, menu_data, menu_tables, menu_attributes = [], [], None, bytes(0x100)
+    if menus:
+        # (menus of commands alone take the titles' picture format)
+        menu_written, menu_data, *menu_tables, menu_attributes = menu_domain(
+            menus, language, 0, pan_scan, letterbox, frame, video)
+    menu_sectors = sum(w.sectors for w in menu_written)
 
     # the tables
     ptt = _table(lambda n, end: struct.pack(">HHI", n, 0, end), 8,
                  [b"".join(struct.pack(">HH", w.number, k) for k in range(1, len(w.programs) + 1))
                   for w in written])
-    pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, subs, t.palette, stills=t.stills,
-                 uops=t.uops) for t, w in zip(titles, written)]
+    pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, sorted(w.stream.subpictures), t.palette,
+                 stills=t.stills, uops=t.uops) for t, w in zip(titles, written)]
     pgci = struct.pack(">HHI", len(pgcs), 0, 0)
     o = 8 + 8 * len(pgcs)
     for w, p in zip(written, pgcs):
@@ -796,7 +818,7 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
         with open(os.path.join(folder, name), "wb") as f:
             f.write(ifo)
         files.append(name)
-    if menus:
+    if menu_sectors:
         if menu_sectors > VOB_FILE_SECTORS:
             raise VtsError("the menus are larger than one VOB file")
         name = f"VTS_{vts:02d}_0.VOB"
