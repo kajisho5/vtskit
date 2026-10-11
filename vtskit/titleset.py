@@ -19,9 +19,12 @@ from its output (tests/test_titleset.py compares the files byte for byte):
   is set when the next entry is in another cell, or there is none;
 * the first cell of a VOB has the STC discontinuity flag, the others the
   seamless playback flag (dvdauthor leaves it off cells it was given one by
-  one; vtskit keeps it); a program chain ends with the Exit command when it
-  has no post commands of its own; a cell's command number is in the
-  fourth byte of its category;
+  one; vtskit leaves it off cells that end in a still); a program chain
+  ends with the Exit command when it has no post commands of its own; a
+  cell's still time is the third byte of its category (0xFF: until the
+  user goes on), its command number the fourth;
+* closed captions in the video are flagged in the video attributes' second
+  byte: bit 7 for field 1, bit 6 for field 2;
 * the audio attributes' second byte is 0xC0 for AC-3 and DTS, 0x40 for
   MPEG and 0x00 for 16-bit LPCM, plus the channels less one;
 * a 4:3 title forbids automatic pan-scan and letterbox (both are moot).
@@ -83,6 +86,8 @@ class Title:
     pre: tuple = ()
     post: tuple = (EXIT,)
     cell_commands: dict = field(default_factory=dict)
+    stills: dict = field(default_factory=dict)      # {chapter: seconds 1-254, or None: until Play}
+    uops: int = 0                                   # user operations the title forbids (bit n: vtskit.vm.UOP_*)
 
 
 @dataclass
@@ -107,6 +112,7 @@ class WrittenTitle:
     cells: list
     vobus: list             # nav.Vobu, sectors counted from this VOB's start
     stream: object
+    uops: int = 0
 
 
 @dataclass
@@ -153,7 +159,7 @@ def cell_starts(vobus, frame, chapters):
     return sorted(out)
 
 
-def _video_attributes(stream, pan_scan, letterbox):
+def _video_attributes(stream, pan_scan, letterbox, captions=(False, False)):
     if stream.sequence is None:
         raise VtsError("the video has no sequence header")
     width, height, aspect, rate = stream.sequence
@@ -171,7 +177,10 @@ def _video_attributes(stream, pan_scan, letterbox):
     else:
         raise VtsError(f"aspect ratio code {aspect} is neither 4:3 nor 16:9")
     byte0 = 0x40 | (0x10 if pal else 0) | (0x0C if aspect == 3 else 0) | flags
-    return bytes((byte0, sizes[(width, height)] << 3))
+    cc = (0x80 if captions[0] else 0) | (0x40 if captions[1] else 0)
+    if cc and pal:
+        raise VtsError("line-21 closed captions are NTSC only")
+    return bytes((byte0, cc | sizes[(width, height)] << 3))
 
 
 def _audio_kind(key):
@@ -228,11 +237,26 @@ def _palette(colours):
     return bytes(out)
 
 
-def _pgc(commands, written, frame, subs, palette, programs=None, title=True):
+def _still(seconds):
+    if seconds is None:
+        return 0xFF
+    if not 1 <= seconds <= 254:
+        raise VtsError(f"a still of {seconds} s: 1 to 254, or None for ever")
+    return seconds
+
+
+def _pgc(commands, written, frame, subs, palette, programs=None, title=True, stills=None, uops=0):
     """One program chain: `commands` = (pre, post, {cell number: command});
-    `programs` the entry cell of each program (default: a program a cell)."""
+    `programs` the entry cell of each program (default: a program a cell);
+    `stills` {cell number: seconds or None} holds the picture at the cell's end."""
     pre, post, cell_commands = commands
     cells = written.cells
+    stills = stills or {}
+    for n in stills:
+        if not 1 <= n <= len(cells):
+            raise VtsError(f"a still for cell {n}; there are {len(cells)}")
+    if not 0 <= uops < 1 << 25:
+        raise VtsError("the user operations are a 25-bit mask")
     for n in cell_commands:
         if not 1 <= n <= len(cells):
             raise VtsError(f"a cell command for cell {n}; there are {len(cells)}")
@@ -251,6 +275,7 @@ def _pgc(commands, written, frame, subs, palette, programs=None, title=True):
     head = bytearray(0xEC)
     head[2], head[3] = len(programs), len(cells)
     head[4:8] = nav.elapsed(cells[-1].e_ptm - cells[0].s_ptm, frame)
+    struct.pack_into(">I", head, 8, uops)
     # streams: available, numbered as the VOB numbers them
     for n, key in enumerate(written.stream.audio):
         number = key[1] & 7 if key[0] == 0xBD else key[0] & 7
@@ -266,8 +291,10 @@ def _pgc(commands, written, frame, subs, palette, programs=None, title=True):
     program_map += b"\0" * (len(program_map) % 2)
     playback = bytearray()
     for c in cells:
-        category = 0x02 if c.number == 1 else 0x08      # STC discontinuity / seamless
-        playback += struct.pack(">BBBB4sIIII", category, 0, 0, command_of.get(c.number, 0),
+        still = _still(stills[c.number]) if c.number in stills else 0
+        # STC discontinuity on the first; seamless on the others unless they stop
+        category = 0x02 if c.number == 1 else (0 if still else 0x08)
+        playback += struct.pack(">BBBB4sIIII", category, 0, still, command_of.get(c.number, 0),
                                 nav.elapsed(c.e_ptm - c.s_ptm, frame), c.first_sector, 0,
                                 c.last_vobu_sector, c.last_sector)
     position = b"".join(struct.pack(">HBB", written.vob_id, 0, c.number) for c in cells)
@@ -349,16 +376,16 @@ def _prepare(number, vob_id, path, cell_times, offset, extra=None, hli=None):
     return WrittenTitle(number, vob_id, stream.sectors, offset, cells, vs, stream), vob
 
 
-def _attributes(written, pan_scan, letterbox, audio, subpictures, what):
+def _attributes(written, pan_scan, letterbox, audio, subpictures, what, captions=(False, False)):
     """(video attr, audio count, audio attrs, subpicture count, subpicture
     attrs, sub-streams) of the first VOB; every other must agree."""
     first = written[0].stream
-    video = _video_attributes(first, pan_scan, letterbox)
+    video = _video_attributes(first, pan_scan, letterbox, captions)
     audio_count, audio_bytes = _audio_attributes(first, audio[0])
     sp_count, sp_bytes, subs = _subpicture_attributes(first, subpictures[0])
     for w, a, sp in zip(written[1:], audio[1:], subpictures[1:]):
         same = (w.stream.frame == first.frame
-                and _video_attributes(w.stream, pan_scan, letterbox) == video
+                and _video_attributes(w.stream, pan_scan, letterbox, captions) == video
                 and _audio_attributes(w.stream, a) == (audio_count, audio_bytes)
                 and _subpicture_attributes(w.stream, sp)[:2] == (sp_count, sp_bytes))
         if not same:
@@ -405,7 +432,7 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True):
     for m, w in zip(menus, written):
         cat = (0x80 | menus_.ENTRY_TYPES[m.entry]) << 24 if m.entry else 0
         pgcs.append(_pgc((m.pre, m.post, {}), w, frame, subs, menus_.palette(m), programs=[1],
-                         title=False))
+                         title=False, uops=m.uops))
         cats.append(cat)
     flags = 0
     for k in kinds:
@@ -438,12 +465,14 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True):
     return written, data, pgci_ut, c_adt, admap, bytes(attributes)
 
 
-def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox=True):
+def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox=True,
+          captions=(False, False)):
     """Write titleset `vts` (1..99) into `folder` (a VIDEO_TS folder): the
     title VOBs, the menu VOB if there are menus, VTS_nn_0.IFO and
     VTS_nn_0.BUP. `language` is the menus' language unit. `pan_scan` and
     `letterbox` say whether a player may show a 16:9 picture that way on a
-    4:3 set."""
+    4:3 set; `captions` whether the titles' video carries line-21 closed
+    captions in field 1 and in field 2."""
     if not 1 <= vts <= 99:
         raise VtsError(f"titleset {vts}: titlesets are numbered 1 to 99")
     if not titles or len(titles) > 99:
@@ -464,13 +493,13 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
     frame = written[0].stream.frame
     video, audio_count, audio, sp_count, subpictures, subs = _attributes(
         written, pan_scan, letterbox, [t.audio for t in titles], [t.subpictures for t in titles],
-        "title")
+        "title", captions)
 
     # the tables
     ptt = _table(lambda n, end: struct.pack(">HHI", n, 0, end), 8,
                  [b"".join(struct.pack(">HH", w.number, c.number) for c in w.cells) for w in written])
-    pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, subs, t.palette)
-            for t, w in zip(titles, written)]
+    pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, subs, t.palette, stills=t.stills,
+                 uops=t.uops) for t, w in zip(titles, written)]
     pgci = struct.pack(">HHI", len(pgcs), 0, 0)
     o = 8 + 8 * len(pgcs)
     for w, p in zip(written, pgcs):
@@ -533,6 +562,8 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
             f.write(b"".join(menu_data))
         files.append(name)
     files += _write_vobs(folder, vts, data, written)
+    for t, w in zip(titles, written):
+        w.uops = t.uops
     return Titleset(vts, folder, sectors, vob_sectors, written, ifo[0x100:0x400], files, menu_sectors)
 
 

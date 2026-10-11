@@ -97,7 +97,10 @@ def write(folder, titlesets, menus=(), first_play=None, language="en", provider=
     for ts in titlesets:
         for t in ts.titles:
             count += 1
-            entries += struct.pack(">BBHHBBI", 0x3C, 1, len(t.cells), 0, ts.vts, t.number, start)
+            # (the title's type: one sequential chain, jumps everywhere, and the
+            # two search operations it forbids, as in its program chain)
+            entries += struct.pack(">BBHHBBI", 0x3C | (t.uops & 3), 1, len(t.cells), 0, ts.vts,
+                                   t.number, start)
         start += ts.sectors
     tt_srpt = struct.pack(">HHI", count, 0, 8 + len(entries) - 1) + entries
 

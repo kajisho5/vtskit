@@ -54,6 +54,19 @@ def author(folder, std, video_attrs, streams, pgcs):
     return os.path.join(out, "VIDEO_TS")
 
 
+def author_cells(folder, mpg, cells):
+    """dvdauthor's VIDEO_TS for one title given cell by cell: [(start, end, attributes)]."""
+    out = os.path.join(folder, "dvd")
+    xml = os.path.join(folder, "dvd.xml")
+    body = "".join(f'<cell start="{a}" end="{b}" chapter="yes" {attrs}/>' for a, b, attrs in cells)
+    with open(xml, "w") as f:
+        f.write(f'<dvdauthor dest="{out}"><vmgm/><titleset><titles><video format="ntsc"/>'
+                f'<audio lang="en"/><pgc><vob file="{mpg}">{body}</vob></pgc></titles></titleset></dvdauthor>')
+    subprocess.run(["dvdauthor", "-x", xml], check=True, capture_output=True,
+                   env={**os.environ, "VIDEO_FORMAT": "NTSC"})
+    return os.path.join(out, "VIDEO_TS")
+
+
 def read(path):
     with open(path, "rb") as f:
         return f.read()
@@ -211,6 +224,62 @@ class TestAgainstDvdauthor(unittest.TestCase):
         # title 2's first chapter again, then its post falls through (g0 is 1)
         self.assertEqual(seen, [(1, 1), (1, 2), (2, 1), (1, 2), (2, 1)])
         self.assertTrue(d.stopped)
+
+    def test_stills_and_uops(self):
+        # cells that stop (for ever, for 3 s) as dvdauthor writes them, given
+        # one by one; dvdauthor leaves the seamless flag off every such cell,
+        # vtskit only off the stopping ones: the first byte of a cell may differ
+        mpg = os.path.join(self.tmp, "a.mpg")
+        encode(mpg, seconds=12)
+        theirs = author_cells(self.tmp, mpg, [("0", "4", 'pause="inf"'), ("4", "8", 'pause="3"'), ("8", "-1", "")])
+        mine = os.path.join(self.tmp, "mine")
+        uops = vm.UOP_TIME_SEARCH | vm.UOP_PTT_SEARCH | vm.UOP_STOP
+        titleset.write(mine, 1, [Title(mpg, (0, 4, 8), (Audio("en", 2),), stills={1: None, 2: 3}, uops=uops)])
+        a, b = read(os.path.join(mine, "VTS_01_0.IFO")), read(os.path.join(theirs, "VTS_01_0.IFO"))
+        pgci = struct.unpack_from(">I", a, 0xCC)[0] * ps.SECTOR
+        p = pgci + struct.unpack_from(">I", a, pgci + 12)[0]
+        cpi = struct.unpack_from(">H", a, p + 0xE8)[0]
+        self.assertEqual(struct.unpack_from(">I", a, p + 8)[0], uops)
+        a, b = bytearray(a), bytearray(b)
+        struct.pack_into(">I", b, p + 8, uops)
+        a[p + cpi + 48] = b[p + cpi + 48] = 0          # the third cell's first byte (0x08 / 0x00)
+        self.assertEqual(bytes(a), bytes(b))
+        with self.assertRaisesRegex(VtsError, "still"):
+            titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, (0, 4), stills={3: None})])
+        with self.assertRaises(VtsError):
+            titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, (0, 4), stills={1: 300})])
+
+    def test_captions_flag(self):
+        mpg = os.path.join(self.tmp, "a.mpg")
+        encode(mpg, seconds=2)
+        for attrs, captions, want in (('caption="field1"', (True, False), 0x4380),
+                                      ('caption="field2"', (False, True), 0x4340)):
+            theirs = author(self.tmp, "ntsc", attrs, "", [(mpg, "0")])
+            mine = os.path.join(self.tmp, "mine")
+            titleset.write(mine, 1, [Title(mpg)], captions=captions)
+            self.assertEqual(read(os.path.join(mine, "VTS_01_0.IFO"))[0x200:0x202], want.to_bytes(2, "big"))
+            self.assertEqual(read(os.path.join(theirs, "VTS_01_0.IFO"))[0x200:0x202], want.to_bytes(2, "big"))
+            shutil.rmtree(mine)
+            shutil.rmtree(os.path.join(self.tmp, "dvd"))
+
+    @unittest.skipUnless(LIBDVDNAV, "needs libdvdnav")
+    def test_still_under_libdvdnav(self):
+        a = os.path.join(self.tmp, "a.mpg")
+        encode(a, seconds=6)
+        theirs = author(self.tmp, "ntsc", "", "", [(a, "0,2,4")])
+        mine = os.path.join(self.tmp, "mine")
+        ts = titleset.write(mine, 1, [Title(a, (0, 2, 4), stills={1: None, 2: 2})])
+        disc = os.path.join(self.tmp, "disc", "VIDEO_TS")
+        shutil.copytree(theirs, disc)
+        for name in ts.files:
+            shutil.copy(os.path.join(mine, name), os.path.join(disc, name))
+        with dvdnav_sim.DvdSim(disc, LIBDVDNAV) as d:
+            d.wait_title()
+            for _ in range(400_000):
+                d.step()
+                if d.stopped:
+                    break
+            self.assertEqual([(s[2], s[3]) for s in d.stills], [(1, 255), (2, 2)])
 
     def test_refused(self):
         mpg = os.path.join(self.tmp, "a.mpg")
