@@ -2,11 +2,14 @@
 
 # vtskit
 
-**In the works:** DVD-Video authoring in pure Python, to replace dvdauthor.
-vtskit will write VIDEO_TS itself: the IFO files, the VOBs' navigation
-packs, menus and the DVD's navigation commands. Its first part, the
-navigation packs, is here and matches dvdauthor byte for byte; the IFO
-files come next (see [What is here now](#what-is-here-now)).
+DVD-Video authoring in pure Python, in place of dvdauthor. vtskit writes
+VIDEO_TS itself: the IFO files, the VOBs' navigation packs, menus,
+subtitles, angle blocks and the DVD's navigation commands, which it also
+compiles from dvdauthor's command language. Where dvdauthor writes the same
+thing, vtskit's bytes are dvdauthor's (see
+[What is here now](#what-is-here-now)); [oncemore](https://github.com/kajisho5/oncemore)
+writes its discs with it ([oncemore#90](https://github.com/kajisho5/oncemore/pull/90),
+angles in [#91](https://github.com/kajisho5/oncemore/pull/91)).
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
@@ -133,7 +136,10 @@ switches angles under libdvdnav, every pointer of its navigation packs
 landing on the unit it names (dvdauthor writes no angles, so a set-top
 player is the check still owed)
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
-it needs is missing). oncemore's switch to vtskit comes next.
+it needs is missing). oncemore's switch to vtskit (step 4) is
+[oncemore#90](https://github.com/kajisho5/oncemore/pull/90) and
+[#91](https://github.com/kajisho5/oncemore/pull/91), which keep a copy of
+`vtskit/` as `oncemore/_vendor/vtskit`.
 
 `vtskit.ifo` and `tests/dvdnav_sim.py` come from
 [oncemore](https://github.com/kajisho5/oncemore) (its `layerbreak.py` and
