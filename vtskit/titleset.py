@@ -18,8 +18,10 @@ from its output (tests/test_titleset.py compares the files byte for byte):
   t that ends before the title does, the sound included; an entry's top bit
   is set when the next entry is in another cell, or there is none;
 * the first cell of a VOB has the STC discontinuity flag, the others the
-  seamless playback flag; a program chain ends with the Exit command when
-  it has no post commands of its own;
+  seamless playback flag (dvdauthor leaves it off cells it was given one by
+  one; vtskit keeps it); a program chain ends with the Exit command when it
+  has no post commands of its own; a cell's command number is in the
+  fourth byte of its category;
 * the audio attributes' second byte is 0xC0 for AC-3 and DTS, 0x40 for
   MPEG and 0x00 for 16-bit LPCM, plus the channels less one;
 * a 4:3 title forbids automatic pan-scan and letterbox (both are moot).
@@ -63,7 +65,9 @@ class Title:
     whether listed or not), an Audio for each sound stream in the order they
     first appear, a Subpicture for each subpicture stream, the 16 colours
     its subpictures choose from as (Y, Cr, Cb) (black where not given), and
-    its program chain's pre, post and cell commands (8 bytes each)."""
+    its program chain's commands: `pre` and `post` as lists of 8-byte
+    commands (`vtskit.vm.assemble` makes them), `cell_commands` as
+    {chapter number: one 8-byte command run when that chapter's cell ends}."""
     stream: str
     chapters: tuple = (0.0,)
     audio: tuple = ()
@@ -71,7 +75,7 @@ class Title:
     palette: tuple = ()
     pre: tuple = ()
     post: tuple = (EXIT,)
-    cell_commands: tuple = ()
+    cell_commands: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -217,10 +221,14 @@ def _palette(colours):
 
 def _pgc(title, written, frame, audio_count, subs):
     """One program chain: a program and a cell a chapter."""
-    for c in (*title.pre, *title.post, *title.cell_commands):
+    cells = written.cells
+    for n in title.cell_commands:
+        if not 1 <= n <= len(cells):
+            raise VtsError(f"a cell command for chapter {n}; the title has {len(cells)}")
+    cell_commands = [title.cell_commands[n] for n in sorted(title.cell_commands)]
+    for c in (*title.pre, *title.post, *cell_commands):
         if len(c) != 8:
             raise VtsError("a VM command is 8 bytes")
-    cells = written.cells
     if len(cells) > 255:
         raise VtsError(f"{len(cells)} chapters (a program chain has at most 255 cells)")
     head = bytearray(0xEC)
@@ -233,15 +241,16 @@ def _pgc(title, written, frame, audio_count, subs):
     for n, sub in enumerate(subs):
         struct.pack_into(">I", head, 0x1C + 4 * n, (0x80 | (sub - 0x20)) << 24)
     head[0xA4:0xE4] = _palette(title.palette)
-    commands = struct.pack(">HHHH", len(title.pre), len(title.post), len(title.cell_commands),
-                           8 + 8 * (len(title.pre) + len(title.post) + len(title.cell_commands)) - 1)
-    commands += b"".join((*title.pre, *title.post, *title.cell_commands))
+    commands = struct.pack(">HHHH", len(title.pre), len(title.post), len(cell_commands),
+                           8 + 8 * (len(title.pre) + len(title.post) + len(cell_commands)) - 1)
+    commands += b"".join((*title.pre, *title.post, *cell_commands))
+    command_of = {n: k for k, n in enumerate(sorted(title.cell_commands), 1)}
     program_map = bytes(range(1, len(cells) + 1))
     program_map += b"\0" * (len(program_map) % 2)
     playback = bytearray()
     for c in cells:
         category = 0x02 if c.number == 1 else 0x08      # STC discontinuity / seamless
-        playback += struct.pack(">BBBB4sIIII", category, 0, 0, 0,
+        playback += struct.pack(">BBBB4sIIII", category, 0, 0, command_of.get(c.number, 0),
                                 nav.elapsed(c.e_ptm - c.s_ptm, frame), c.first_sector, 0,
                                 c.last_vobu_sector, c.last_sector)
     position = b"".join(struct.pack(">HBB", written.vob_id, 0, c.number) for c in cells)
