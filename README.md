@@ -64,22 +64,33 @@ play the discs vtskit writes.
 
 ## What is here now
 
-The first part of step 1, and what the writer is checked with:
+Step 1 is under way: titlesets without menus, and what they are checked with.
 
+* `vtskit.titleset` writes a titleset: the title VOBs (one a title, cut
+  into files under 1 GiB) with their navigation packs filled, and
+  VTS_nn_0.IFO with its BUP: the streams' attributes, each title's chapters,
+  a program chain a title (programs and cells one a chapter, its pre, post
+  and cell commands given as bytes), the time maps, the cell and VOBU
+  address tables. A chapter starts at the VOBU nearest its time, as
+  dvdauthor places it. Angles, menus, the VMG and a command compiler are not
+  written yet.
 * `vtskit.nav` fills the navigation packs of a VOB: the PCI (times) and DSI
   (where the VOBU and its reference pictures end, where the VOBUs 0.5 s to
   120 s away start, where its sound and subtitles start). `vtskit.ps` reads
-  the program stream for it.
+  the program stream for both.
 * `vtskit.ifo` reads where each chapter of each title starts, as a sector of
   the disc, from the IFO files.
 * `tests/dvdnav_sim.py` plays a disc with libdvdnav through ctypes: titles,
   chapters, menus and buttons, sound and subtitle tracks, and angles.
 
-The tests give the same streams to dvdauthor and to vtskit, and the VOBs
-must be the same byte for byte: NTSC and PAL, AC-3, LPCM and MPEG sound,
-B-pictures, short GOPs, a 40-second title, two sound tracks and a subtitle
-track (`python -m unittest discover -s tests -t .`; a test is skipped when
-a tool it needs is missing). The IFO files come next.
+The tests give the same titles to dvdauthor and to vtskit, and the IFO and
+the VOBs must be the same byte for byte: NTSC and PAL, 4:3 and 16:9,
+chapters on and between VOBU starts, two titles in a titleset, AC-3, LPCM
+and MPEG sound with languages, B-pictures, short GOPs, a 40-second title,
+a subtitle track. A disc made of dvdauthor's VMG and vtskit's titleset
+plays its chapters in order under libdvdnav
+(`python -m unittest discover -s tests -t .`; a test is skipped when a tool
+it needs is missing). The VMG and the command compiler come next.
 
 `vtskit.ifo` and `tests/dvdnav_sim.py` come from
 [oncemore](https://github.com/kajisho5/oncemore) (its `layerbreak.py` and

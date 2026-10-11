@@ -126,6 +126,7 @@ class _Video:
     def __init__(self):
         self.pictures = []
         self.frame = None
+        self.sequence = None         # (width, height, aspect_ratio_information, frame_rate_code)
         self.tail = b""              # unread bytes of the packets before
         self.tail_sectors = []       # the sector of each
         self.before = None           # the sector of the byte before the tail
@@ -158,6 +159,9 @@ class _Video:
                 self.pictures[-1].end = sector_of(k - 1)
             if code == _SEQ and self.frame is None:
                 self.frame = _FRAME.get(buf[k + 7] & 0x0F)
+                self.sequence = (buf[k + 4] << 4 | buf[k + 5] >> 4,
+                                 (buf[k + 5] & 0x0F) << 8 | buf[k + 6],
+                                 buf[k + 7] >> 4, buf[k + 7] & 0x0F)
             elif code == _PICTURE:
                 t = "?IPB"[(buf[k + 5] >> 3) & 7]
                 # a packet's PTS belongs to the first picture that starts in it
@@ -236,15 +240,35 @@ def _spu_times(sector, pts, spu):
 
 
 class Stream:
-    """What a navigation pack needs to know of a stream."""
+    """What a navigation pack and a titleset need to know of a stream."""
 
     def __init__(self):
         self.sectors = 0
         self.navs = []               # (sector, SCR) of each navigation pack
         self.pictures = []
-        self.frame = None
+        self.frame = None            # 90 kHz ticks per frame
+        self.sequence = None         # (width, height, aspect_ratio_information, frame_rate_code)
         self.audio = {}              # (stream id, sub-stream) -> [(sector, pts, frames)]
+        self.mpeg_audio = {}         # stream id -> [bytes so far, first 4 bytes]
         self.subpictures = {}        # sub-stream -> [(first sector, shown from, until)]
+
+    @property
+    def video_end(self):
+        """When the last picture has been shown."""
+        ends = [p.pts + p.fields * self.frame / 2 for p in self.pictures if p.pts is not None]
+        return int(max(ends)) if ends else None
+
+    def audio_end(self, key):
+        """When a sound stream ends (None when unknown)."""
+        if key[0] != 0xBD:
+            return mpeg_audio_end(self.audio[key], self.mpeg_audio.get(key[0]))
+        return audio_end(self.audio[key], key)
+
+    @property
+    def end(self):
+        """When the last of the video and the sound ends."""
+        ends = [self.video_end] + [self.audio_end(k) for k in self.audio]
+        return max(e for e in ends if e is not None)
 
 
 def scan(data):
@@ -263,8 +287,12 @@ def scan(data):
             elif e.sid == 0xBD or 0xC0 <= e.sid <= 0xDF:
                 key = (0xBD, e.sub) if e.sid == 0xBD else (e.sid, None)
                 out.audio.setdefault(key, []).append((pk.sector, e.pts, e.frames))
+                if e.sid != 0xBD:
+                    m = out.mpeg_audio.setdefault(e.sid, [0, bytes(data[e.start:e.start + 4])])
+                    m[0] += e.end - e.start
     video.close()
     out.pictures, out.frame = video.pictures, video.frame
+    out.sequence = video.sequence
     out.subpictures = spu.units
     return out
 
@@ -308,3 +336,34 @@ def audio_end(packets, key):
             last, frames = pts, 0
         frames += n or 0
     return None if last is None else last + frames * tick
+
+
+# MPEG-1 audio (ISO/IEC 11172-3) frame header: bit rates in kbit/s by layer
+_MPEG_BITRATES = {
+    3: (0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448),   # layer I
+    2: (0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384),      # layer II
+}
+_MPEG_RATES = (44100, 48000, 32000)
+
+
+def mpeg_audio_end(packets, counted):
+    """When an MPEG audio stream ends: its first stamped packet's PTS plus
+    the frames its bytes hold (`counted`: [bytes, the first frame header]),
+    at the constant bit rate of that header. None when nothing is known."""
+    if not counted or counted[0] == 0:
+        return None
+    first = next((pts for _, pts, _ in packets if pts is not None), None)
+    if first is None:
+        return None
+    h = counted[1]
+    if len(h) < 4 or h[0] != 0xFF or (h[1] & 0xF8) != 0xF8:
+        raise VtsError("MPEG audio that is not MPEG-1 (the only kind a DVD carries)")
+    layer = (h[1] >> 1) & 3
+    bitrate = _MPEG_BITRATES.get(layer, (0,) * 16)[h[2] >> 4] * 1000
+    rate_index = (h[2] >> 2) & 3
+    if layer not in _MPEG_BITRATES or not bitrate or rate_index > 2:
+        raise VtsError("an MPEG audio frame header vtskit cannot read")
+    rate = _MPEG_RATES[rate_index]
+    samples = 384 if layer == 3 else 1152
+    size = samples // 8 * bitrate // rate
+    return first + round(counted[0] / size) * samples * 90000 // rate

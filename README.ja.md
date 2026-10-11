@@ -32,13 +32,14 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 
 ## いまあるもの
 
-計画のステップ1の前半と、書き出しを確かめるための道具です。
+計画のステップ1（メニューの無いタイトルセット）を進めています。
 
-* `vtskit.nav`：VOB のナビゲーションパックを埋めます。PCI（時刻）と DSI（VOBU と参照ピクチャの終わり、0.5 秒〜120 秒先と前の VOBU の位置、音声と字幕の始まり）。`vtskit.ps` がそのためにプログラムストリームを読みます。
+* `vtskit.titleset`：タイトルセットを書きます。タイトルの VOB（タイトルごとに1本、1 GiB 未満のファイルに分割）にナビゲーションパックを埋め、VTS_nn_0.IFO と BUP を書きます。IFO には、ストリームの属性、各タイトルのチャプター、タイトルごとのプログラムチェーン（チャプターごとのプログラムとセル、バイト列で与える pre・post・セル命令）、タイムマップ、セルと VOBU のアドレス表が入ります。チャプターは dvdauthor と同じく、指定時刻に最も近い VOBU の先頭から始まります。アングル、メニュー、VMG、命令の変換器はまだありません。
+* `vtskit.nav`：VOB のナビゲーションパックを埋めます。PCI（時刻）と DSI（VOBU と参照フレームの終端、0.5 秒から 120 秒先の VOBU の位置、音声と字幕の位置）。`vtskit.ps` がプログラムストリームを読みます。
 * `vtskit.ifo`：IFO ファイルから、各タイトルの各チャプターがディスクのどのセクターから始まるかを読みます。
 * `tests/dvdnav_sim.py`：libdvdnav を ctypes で呼んでディスクを再生します（タイトル、チャプター、メニューとボタン、音声・字幕トラック、アングル）。
 
-テストは同じストリームを dvdauthor と vtskit に渡し、できた VOB がバイト単位で一致することを確かめます。NTSC と PAL、AC-3・LPCM・MPEG 音声、B ピクチャ、短い GOP、40 秒のタイトル、音声2本と字幕1本です（`python -m unittest discover -s tests -t .`。必要な道具が無いテストはスキップします）。次は IFO ファイルです。
+テストは同じタイトルを dvdauthor と vtskit に渡し、IFO と VOB が全バイト一致することを確かめます。NTSC と PAL、4:3 と 16:9、VOBU 先頭に乗るチャプターと乗らないチャプター、1 タイトルセットに 2 タイトル、言語付きの AC-3・LPCM・MPEG 音声、B フレーム、短い GOP、40 秒のタイトル、字幕トラック。dvdauthor の VMG と vtskit のタイトルセットを組み合わせたディスクは、libdvdnav でチャプターが順に再生されます（`python -m unittest discover -s tests -t .`。必要な道具が無いテストはスキップします）。次は VMG と命令の変換器です。
 
 `vtskit.ifo` と `tests/dvdnav_sim.py` は [oncemore](https://github.com/kajisho5/oncemore) のもの（`layerbreak.py` と `tests/dvdnav_sim.py`。oncemore では GPL-3.0）で、作者がここでは LGPL-3.0-or-later で再ライセンスしています。
 

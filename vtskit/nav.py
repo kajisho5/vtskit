@@ -52,7 +52,6 @@ def vobus(stream):
         raise VtsError("the stream does not start with a navigation pack")
     starts = [s for s, _ in stream.navs]
     out = [Vobu(s, e - 1, scr) for (s, scr), e in zip(stream.navs, starts[1:] + [stream.sectors])]
-    frame = stream.frame
     k = 0
     for p in stream.pictures:
         while k + 1 < len(out) and p.start >= out[k + 1].start:
@@ -63,16 +62,11 @@ def vobus(stream):
             v.s_ptm = p.pts
         if p.type in "IP" and len(v.refs) < 3:
             v.refs.append(p.end - v.start)
-    ends = [p.pts + p.fields * frame / 2 for p in stream.pictures if p.pts is not None]
-    for key, packets in stream.audio.items():
-        e = ps.audio_end(packets, key)
-        if e is not None:
-            ends.append(e)
     if any(v.s_ptm is None for v in out):
         raise VtsError("a VOBU without video (VOBUs of sound or stills alone are not written yet)")
     for a, b in zip(out, out[1:]):
         a.e_ptm = b.s_ptm
-    out[-1].e_ptm = int(max(ends))
+    out[-1].e_ptm = stream.end
     return out
 
 
@@ -213,7 +207,9 @@ def fill(data, cells, lbn=0, uops=0, stream=None):
         struct.pack_into(">IIIIIII", pci, 0, lbn + v.start, 0, uops,
                          v.s_ptm, v.e_ptm, 0, int.from_bytes(eltm, "big"))
         dsi = bytearray(0x3FA - 1)
-        refs = v.refs + [0] * (3 - len(v.refs))
+        # (fewer than three reference pictures: the last one's end again,
+        # as dvdauthor writes it)
+        refs = v.refs + [v.refs[-1] if v.refs else 0] * (3 - len(v.refs))
         struct.pack_into(">IIIIIIHxB4s", dsi, 0, v.scr & 0xFFFFFFFF, lbn + v.start,
                          v.end - v.start, *refs, vob_id, cell_id, eltm)
         struct.pack_into(">II", dsi, 0x2C, vob_s[vob_id], vob_e[vob_id])
