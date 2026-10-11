@@ -36,10 +36,26 @@ menus marked), VTSM_C_ADT and VTSM_VOBU_ADMAP, and the menus' attributes.
 As dvdauthor does, a titleset with a root menu and no chapter (PTT) menu
 gets an empty chapter-menu program chain that links to the root.
 
+A title may be several parts in a row, each a program stream (its own VOB)
+or an Angles block of 2 to 9 streams the viewer switches between. An angle
+block is interleaved (dvdinfo dsi_pkt.html, pgc.html): each angle's VOBUs
+are cut into interleaved units (ILVUs) of the same number of VOBUs, and the
+units take turns on the disc, angle 1's first, then angle 2's, ... then
+angle 1's second; every VOBU's DSI says where its unit ends, where its
+angle's next unit is, and where every angle's next unit is (SML_AGLI);
+every PCI where every angle's VOBU of the same moment is (NSML_AGLI); the
+three VOBUs before a block carry the PREU flags; the block's cells are one
+an angle, marked first, middle and last of an angle block, interleaved,
+and seamless when asked. dvdauthor writes no angles, so none of this is
+checked against it: the structure is checked against the descriptions and
+libdvdnav plays and switches the angles (tests/test_angles.py); a set-top
+player is the check still owed.
+
 Not checked against dvdauthor (it needs a title over 1 GiB): the VOBs are
 cut into files of at most 524272 sectors, at VOBU starts.
 """
 
+import bisect
 import os
 import struct
 from dataclasses import dataclass, field
@@ -69,16 +85,28 @@ class Subpicture:
 
 
 @dataclass
+class Angles:
+    """A stretch of a title the viewer may watch from 2 to 9 angles: that
+    many program streams of the same length whose VOBUs line up in time (the
+    same GOPs). `seamless`: the player switches without a break. `ilvu_vobus`:
+    VOBUs an interleaved unit (default: as many as make a second)."""
+    streams: tuple
+    seamless: bool = True
+    ilvu_vobus: int | None = None
+
+
+@dataclass
 class Title:
-    """A title: its program stream (ffmpeg -f dvd, as oncemore encodes),
-    chapter times in seconds from its start (the first chapter is at 0
-    whether listed or not), an Audio for each sound stream in the order they
-    first appear, a Subpicture for each subpicture stream, the 16 colours
-    its subpictures choose from as (Y, Cr, Cb) (black where not given), and
-    its program chain's commands: `pre` and `post` as lists of 8-byte
-    commands (`vtskit.vm.assemble` makes them), `cell_commands` as
-    {chapter number: one 8-byte command run when that chapter's cell ends}."""
-    stream: str
+    """A title: its program stream (ffmpeg -f dvd, as oncemore encodes), or
+    `parts` in play order (streams and Angles blocks); chapter times in
+    seconds from its start (the first chapter is at 0 whether listed or
+    not), an Audio for each sound stream in the order they first appear, a
+    Subpicture for each subpicture stream, the 16 colours its subpictures
+    choose from as (Y, Cr, Cb) (black where not given), and its program
+    chain's commands: `pre` and `post` as lists of 8-byte commands
+    (`vtskit.vm.assemble` makes them), `cell_commands` as {chapter number:
+    one 8-byte command run when the chapter's last cell ends}."""
+    stream: str | None = None
     chapters: tuple = (0.0,)
     audio: tuple = ()
     subpictures: tuple = ()
@@ -88,31 +116,59 @@ class Title:
     cell_commands: dict = field(default_factory=dict)
     stills: dict = field(default_factory=dict)      # {chapter: seconds 1-254, or None: until Play}
     uops: int = 0                                   # user operations the title forbids (bit n: vtskit.vm.UOP_*)
+    parts: tuple = ()
 
 
 @dataclass
 class Cell:
-    number: int
-    first_vobu: int
+    number: int             # in the program chain
+    vob_id: int
+    cell_id: int            # in its VOB
+    first_vobu: int         # indexes in its VOB
     last_vobu: int
     first_sector: int       # in the title VOBs
+    first_ilvu_end: int     # the last sector of its first interleaved unit (angles), else 0
     last_vobu_sector: int
     last_sector: int
     s_ptm: int
-    e_ptm: int              # the next cell's start, or the title's video end
+    e_ptm: int              # the next cell's start in its VOB, or the VOB's video end
+    program: int = 1        # the program (chapter) it belongs to
+    angle: int = 0          # 0: not in an angle block; else the angle (1..9)
+    angles: int = 0         # the angles of its block
+    stc_discontinuity: bool = True   # the first cell of its VOB
+    seamless: bool = False  # continues the previous cell without a break
+    interleaved: bool = False
+    last_of_program: bool = True
+    segment: tuple = (0, 1)     # (part, stretch of it) the cell plays
+
+    @property
+    def category(self):
+        """The first byte of the cell category."""
+        kind = 0
+        if self.angle:
+            kind = 0x40 if self.angle == 1 else 0xC0 if self.angle == self.angles else 0x80
+            kind |= 0x10
+        return kind | (0x08 if self.seamless else 0) | (0x04 if self.interleaved else 0) \
+            | (0x02 if self.stc_discontinuity else 0) | (0x01 if self.seamless and self.angle else 0)
 
 
 @dataclass
 class WrittenTitle:
-    """A title's (or a menu's) VOB as written."""
+    """A title's VOBs as written (a menu: its one VOB)."""
     number: int             # in the titleset (a menu: its program chain number)
-    vob_id: int
-    sectors: int
+    vob_id: int             # the first VOB's
+    sectors: int            # of all its VOBs
     first_sector: int
-    cells: list
-    vobus: list             # nav.Vobu, sectors counted from this VOB's start
-    stream: object
+    cells: list             # in program chain order
+    vobus: list             # nav.Vobu of the first VOB (a menu's)
+    stream: object          # the first VOB's stream (its attributes)
     uops: int = 0
+    programs: list = field(default_factory=list)    # the entry cell of each program
+    angles: int = 1
+    chunks: list = field(default_factory=list)      # (sector, bytes) to lay on the disc
+    timeline: list = field(default_factory=list)    # (tick from the start, sector, cell number) of each VOBU played
+    end: int = 0                                    # ticks from the start to the end, the sound included
+    vobu_sectors: list = field(default_factory=list)
 
 
 @dataclass
@@ -245,21 +301,22 @@ def _still(seconds):
     return seconds
 
 
-def _pgc(commands, written, frame, subs, palette, programs=None, title=True, stills=None, uops=0):
-    """One program chain: `commands` = (pre, post, {cell number: command});
-    `programs` the entry cell of each program (default: a program a cell);
-    `stills` {cell number: seconds or None} holds the picture at the cell's end."""
+def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=0):
+    """One program chain: `commands` = (pre, post, {chapter: command});
+    `stills` {chapter: seconds or None} holds the picture at the chapter's
+    last cell's end."""
     pre, post, cell_commands = commands
     cells = written.cells
+    programs = written.programs or [1]
     stills = stills or {}
     for n in stills:
-        if not 1 <= n <= len(cells):
-            raise VtsError(f"a still for cell {n}; there are {len(cells)}")
+        if not 1 <= n <= len(programs):
+            raise VtsError(f"a still for chapter {n}; there are {len(programs)}")
     if not 0 <= uops < 1 << 25:
         raise VtsError("the user operations are a 25-bit mask")
     for n in cell_commands:
-        if not 1 <= n <= len(cells):
-            raise VtsError(f"a cell command for cell {n}; there are {len(cells)}")
+        if not 1 <= n <= len(programs):
+            raise VtsError(f"a cell command for chapter {n}; there are {len(programs)}")
     cell_list = [cell_commands[n] for n in sorted(cell_commands)]
     for c in (*pre, *post, *cell_list):
         if len(c) != 8:
@@ -271,10 +328,9 @@ def _pgc(commands, written, frame, subs, palette, programs=None, title=True, sti
             raise VtsError("a title cannot JumpTT or JumpSS: call a menu or the first-play chain")
     if len(cells) > 255:
         raise VtsError(f"{len(cells)} cells (a program chain has at most 255)")
-    programs = list(programs) if programs is not None else list(range(1, len(cells) + 1))
     head = bytearray(0xEC)
     head[2], head[3] = len(programs), len(cells)
-    head[4:8] = nav.elapsed(cells[-1].e_ptm - cells[0].s_ptm, frame)
+    head[4:8] = nav.elapsed(sum(c.e_ptm - c.s_ptm for c in cells if c.angle <= 1), frame)
     struct.pack_into(">I", head, 8, uops)
     # streams: available, numbered as the VOB numbers them
     for n, key in enumerate(written.stream.audio):
@@ -291,13 +347,14 @@ def _pgc(commands, written, frame, subs, palette, programs=None, title=True, sti
     program_map += b"\0" * (len(program_map) % 2)
     playback = bytearray()
     for c in cells:
-        still = _still(stills[c.number]) if c.number in stills else 0
-        # STC discontinuity on the first; seamless on the others unless they stop
-        category = 0x02 if c.number == 1 else (0 if still else 0x08)
-        playback += struct.pack(">BBBB4sIIII", category, 0, still, command_of.get(c.number, 0),
-                                nav.elapsed(c.e_ptm - c.s_ptm, frame), c.first_sector, 0,
+        ends = c.last_of_program                     # the chapter's last cell(s)
+        still = _still(stills[c.program]) if ends and c.program in stills else 0
+        category = c.category & (~0x08 if still else 0xFF)     # (a stop is not seamless)
+        playback += struct.pack(">BBBB4sIIII", category, 0, still,
+                                command_of.get(c.program, 0) if ends else 0,
+                                nav.elapsed(c.e_ptm - c.s_ptm, frame), c.first_sector, c.first_ilvu_end,
                                 c.last_vobu_sector, c.last_sector)
-    position = b"".join(struct.pack(">HBB", written.vob_id, 0, c.number) for c in cells)
+    position = b"".join(struct.pack(">HBB", c.vob_id, 0, c.cell_id) for c in cells)
     o = len(head)
     struct.pack_into(">HHHH", head, 0xE4, o, o + len(table), o + len(table) + len(program_map),
                      o + len(table) + len(program_map) + len(playback))
@@ -317,24 +374,17 @@ def _time_map(written, frame):
     """A program chain's time map: for each whole second t before the title
     ends, the VOBU playing at frame t * 30 (25), its top bit set when the
     next entry is in another cell or there is none."""
-    vs = written.vobus
-    start = vs[0].s_ptm
     fps = _nominal(frame)
-    cell_of = {}
-    for c in written.cells:
-        for i in range(c.first_vobu, c.last_vobu + 1):
-            cell_of[i] = c.number
+    ticks = [t for t, _, _ in written.timeline]
     picks = []
     t = 1
-    while t * fps * frame < vs[-1].e_ptm - start:
-        tick = start + t * fps * frame
-        i = max(i for i, v in enumerate(vs) if v.s_ptm <= tick)
-        picks.append(i)
+    while t * fps * frame < written.end:
+        picks.append(bisect.bisect_right(ticks, t * fps * frame) - 1)
         t += 1
     entries = []
     for k, i in enumerate(picks):
-        last = k + 1 == len(picks) or cell_of[picks[k + 1]] != cell_of[i]
-        entries.append((0x80000000 if last else 0) | (written.first_sector + vs[i].start))
+        last = k + 1 == len(picks) or written.timeline[picks[k + 1]][2] != written.timeline[i][2]
+        entries.append((0x80000000 if last else 0) | written.timeline[i][1])
     return struct.pack(">BBH", 1, 0, len(entries)) + struct.pack(f">{len(entries)}I", *entries)
 
 
@@ -369,11 +419,214 @@ def _prepare(number, vob_id, path, cell_times, offset, extra=None, hli=None):
     cells = []
     for c, (a, b) in enumerate(zip(bounds, bounds[1:]), 1):
         end = vs[b].s_ptm if b < len(vs) else stream.video_end
-        cells.append(Cell(c, a, b - 1, offset + vs[a].start, offset + vs[b - 1].start,
-                          offset + vs[b - 1].end, vs[a].s_ptm, end))
-    nav.fill(vob, [(vob_id, c.number, c.first_vobu, c.last_vobu) for c in cells], offset,
+        cells.append(Cell(c, vob_id, c, a, b - 1, offset + vs[a].start, 0, offset + vs[b - 1].start,
+                          offset + vs[b - 1].end, vs[a].s_ptm, end, stc_discontinuity=c == 1,
+                          seamless=c > 1, last_of_program=c == len(starts)))
+    nav.fill(vob, [(vob_id, c.cell_id, c.first_vobu, c.last_vobu) for c in cells], offset,
              stream=stream, hli={vob_id: hli} if hli else None)
-    return WrittenTitle(number, vob_id, stream.sectors, offset, cells, vs, stream), vob
+    s0 = vs[0].s_ptm
+    timeline = [(v.s_ptm - s0, offset + v.start, c.number) for c in cells
+                for v in vs[c.first_vobu:c.last_vobu + 1]]
+    w = WrittenTitle(number, vob_id, stream.sectors, offset, cells, vs, stream, programs=[1],
+                     chunks=[(offset, vob)], timeline=timeline, end=vs[-1].e_ptm - s0,
+                     vobu_sectors=[offset + v.start for v in vs])
+    return w, vob
+
+
+
+def _load(path):
+    with open(path, "rb") as f:
+        vob = ps.drop_padding(f.read())
+    stream = ps.scan(vob)
+    vs = nav.vobus(stream)
+    return stream, vs, vob
+
+
+def _aligned(loaded, where):
+    """Angles must have the same VOBUs in time (the same GOPs) and length."""
+    first = loaded[0]
+    for k, other in enumerate(loaded[1:], 2):
+        same = len(other[1]) == len(first[1]) and all(
+            a.s_ptm - first[1][0].s_ptm == b.s_ptm - other[1][0].s_ptm for a, b in zip(first[1], other[1])) \
+            and first[0].video_end - first[1][0].s_ptm == other[0].video_end - other[1][0].s_ptm
+        if not same:
+            raise VtsError(f"{where}: angle {k} differs from angle 1 in length or GOP layout")
+
+
+def _title(number, title, offset, vob_id):
+    """Read a title's parts, place its chapters, lay its VOBUs on the disc
+    (interleaving the angle blocks) and fill their navigation packs:
+    (WrittenTitle, the next free sector, the next VOB id)."""
+    parts = title.parts or (title.stream,)
+    if not parts or title.stream and title.parts:
+        raise VtsError(f"title {number}: give a stream or parts, not both")
+    loaded = []                 # a part: [(stream, vobus, bytes)] one an angle
+    for k, part in enumerate(parts, 1):
+        if isinstance(part, Angles):
+            if not 2 <= len(part.streams) <= 9:
+                raise VtsError(f"title {number}, part {k}: 2 to 9 angles")
+            angles = [_load(p) for p in part.streams]
+            _aligned(angles, f"title {number}, part {k}")
+            loaded.append(angles)
+        elif isinstance(part, str):
+            loaded.append([_load(part)])
+        else:
+            raise VtsError(f"title {number}, part {k}: a stream path or Angles")
+    frame = loaded[0][0][0].frame
+    if any(a[0].frame != frame for part in loaded for a in part):
+        raise VtsError(f"title {number}: its parts differ in frame rate")
+    fps = _nominal(frame)
+
+    # the chapters, on the title's own time line, each at the nearest VOBU start
+    part_start = []             # tick at which each part begins
+    tick = 0
+    for part in loaded:
+        part_start.append(tick)
+        st, vs, _ = part[0]
+        tick += st.video_end - vs[0].s_ptm
+    end = sum(a[0].end - a[1][0].s_ptm for a in (part[0] for part in loaded))
+    starts = [(part_start[k] + v.s_ptm - part[0][1][0].s_ptm, k, i)
+              for k, part in enumerate(loaded) for i, v in enumerate(part[0][1])]
+    chapter_at = {(0, 0)}
+    for t in title.chapters:
+        if t < 0:
+            raise VtsError(f"a chapter at {t} s, before the start")
+        want = t * fps * frame
+        _, k, i = min(starts, key=lambda s: (abs(s[0] - want), s[1], s[2]))
+        chapter_at.add((k, i))
+    programs = []               # entry cell of each chapter
+    cells = []
+    chunks, timeline, vobu_sectors = [], [], []
+    ilvu_info = {}              # (part, angle) -> {vobu: ilvu tuple}
+    nsml_info = {}
+    layouts = {}                # (part, angle) -> [sector of each VOBU]
+    first_vob = vob_id
+    sector = offset
+    jobs = []                   # (part, angle, VOB id) to fill
+    preceding = []              # (part, angle, vobu index) of the VOBUs laid before, in order
+    for k, part in enumerate(loaded):
+        n_angles = len(part)
+        vs0 = part[0][1]
+        bounds = sorted(i for (kk, i) in chapter_at if kk == k) + [len(vs0)]
+        if bounds[0] != 0:
+            bounds.insert(0, 0)
+        for a in range(n_angles):
+            layouts[(k, a)] = [None] * len(vs0)
+            ilvu_info[(k, a)] = {}
+            nsml_info[(k, a)] = {}
+        for seg, (i0, i1) in enumerate(zip(bounds, bounds[1:]), 1):
+            is_chapter = (k, i0) in chapter_at
+            if is_chapter:
+                programs.append(len(cells) + 1)
+            if n_angles == 1:
+                st, vs, _ = part[0]
+                for i in range(i0, i1):
+                    layouts[(k, 0)][i] = sector
+                    timeline.append((part_start[k] + vs[i].s_ptm - vs[0].s_ptm, sector, len(cells) + 1))
+                    vobu_sectors.append(sector)
+                    preceding.append((k, 0, i))
+                    sector += vs[i].end - vs[i].start + 1
+                e = vs[i1].s_ptm if i1 < len(vs) else st.video_end
+                lay = layouts[(k, 0)]
+                cells.append(Cell(len(cells) + 1, vob_id, seg, i0, i1 - 1, lay[i0], 0, lay[i1 - 1],
+                                  lay[i1 - 1] + vs[i1 - 1].end - vs[i1 - 1].start, vs[i0].s_ptm, e,
+                                  len(programs), stc_discontinuity=seg == 1, seamless=seg > 1,
+                                  segment=(k, seg)))
+            else:
+                block = parts[k]
+                unit = block.ilvu_vobus
+                if unit is None:        # as many VOBUs as make a second
+                    span = vs0[i0 + 1].s_ptm - vs0[i0].s_ptm if i1 - i0 > 1 else 90000
+                    unit = max(1, -(-90000 // span))
+                if unit < 1:
+                    raise VtsError("an interleaved unit holds at least one VOBU")
+                groups = [range(g, min(g + unit, i1)) for g in range(i0, i1, unit)]
+                # the three VOBUs before the block: PREU (the first of them
+                # Unit_Start, the last Unit_End), when they are not interleaved
+                before = [p for p in preceding[-3:] if not isinstance(parts[p[0]], Angles)]
+                for n, (pk, pa, pi) in enumerate(before):
+                    flags = 0x8000 | (0x2000 if n == 0 else 0) | (0x1000 if n == len(before) - 1 else 0)
+                    ilvu_info[(pk, pa)][pi] = (flags, 0, 0, 0, [(0, 0)] * 9)
+                # lay the units out, angle by angle within each group
+                unit_start = {}         # (angle, group) -> first sector
+                unit_size = {}
+                for g, rng in enumerate(groups):
+                    for a in range(n_angles):
+                        vs = part[a][1]
+                        unit_start[(a, g)] = sector
+                        for i in rng:
+                            layouts[(k, a)][i] = sector
+                            vobu_sectors.append(sector)
+                            if a == 0:
+                                timeline.append((part_start[k] + vs[i].s_ptm - vs[0].s_ptm, sector,
+                                                 len(cells) + 1))
+                            preceding.append((k, a, i))
+                            sector += vs[i].end - vs[i].start + 1
+                        unit_size[(a, g)] = sector - unit_start[(a, g)]
+                for a in range(n_angles):
+                    vs = part[a][1]
+                    lay = layouts[(k, a)]
+                    for g, rng in enumerate(groups):
+                        unit_end = unit_start[(a, g)] + unit_size[(a, g)] - 1
+                        last_group = g + 1 == len(groups)
+                        for i in rng:
+                            flags = 0x4000 | (0x2000 if i == rng[0] else 0) | (0x1000 if i == rng[-1] else 0)
+                            if last_group:
+                                nxt_sa, nxt_sz = 0xFFFFFFFF, 0xFFFF
+                            else:
+                                nxt_sa, nxt_sz = unit_start[(a, g + 1)] - lay[i], unit_size[(a, g + 1)]
+                            agli = []
+                            for b in range(9):
+                                if b >= n_angles:
+                                    agli.append((0, 0))
+                                elif last_group:
+                                    agli.append((0x7FFFFFFF, 0))
+                                else:
+                                    agli.append((unit_start[(b, g + 1)] - lay[i], unit_size[(b, g + 1)]))
+                            ilvu_info[(k, a)][i] = (flags, unit_end - lay[i], nxt_sa, nxt_sz, agli)
+                            nsml = []
+                            for b in range(9):
+                                if b >= n_angles:
+                                    nsml.append(0)
+                                else:
+                                    d = layouts[(k, b)][i] - lay[i]
+                                    nsml.append(d if d >= 0 else 0x80000000 | -d)
+                            nsml_info[(k, a)][i] = nsml
+                    st = part[a][0]
+                    e = vs[i1].s_ptm if i1 < len(vs) else st.video_end
+                    first_end = unit_start[(a, 0)] + unit_size[(a, 0)] - 1
+                    cells.append(Cell(len(cells) + 1, vob_id + a, seg, i0, i1 - 1, lay[i0], first_end,
+                                      lay[i1 - 1], lay[i1 - 1] + vs[i1 - 1].end - vs[i1 - 1].start,
+                                      vs[i0].s_ptm, e, len(programs), a + 1, n_angles,
+                                      stc_discontinuity=seg == 1, seamless=block.seamless and seg > 1,
+                                      interleaved=True, segment=(k, seg)))
+        for a in range(n_angles):
+            jobs.append((k, a, vob_id + a))
+        vob_id += n_angles
+    # fill every VOB now that every sector, and every flag of the VOBUs
+    # before an angle block, is known
+    for k, a, vid in jobs:
+        st, vs, vob = loaded[k][a]
+        vob_cells = [(vid, c.cell_id, c.first_vobu, c.last_vobu) for c in cells if c.vob_id == vid]
+        nav.fill(vob, vob_cells, stream=st, layout=layouts[(k, a)], ilvu=ilvu_info[(k, a)],
+                 nsml=nsml_info[(k, a)])
+        lay = layouts[(k, a)]
+        if len(loaded[k]) == 1:
+            chunks.append((lay[0], vob))
+        else:
+            for i, v in enumerate(vs):
+                chunks.append((lay[i], vob[v.start * SECTOR:(v.end + 1) * SECTOR]))
+    # a chapter's last cells: those of its last stretch (every angle of it)
+    last = {}
+    for c in cells:
+        last[c.program] = max(last.get(c.program, (0, 0)), c.segment)
+    for c in cells:
+        c.last_of_program = c.segment == last[c.program]
+    first = loaded[0][0]
+    w = WrittenTitle(number, first_vob, sector - offset, offset, cells, first[1], first[0],
+                     programs=programs, angles=max(len(p) for p in loaded), chunks=chunks,
+                     timeline=timeline, end=end, vobu_sectors=vobu_sectors)
+    return w, sector, vob_id
 
 
 def _attributes(written, pan_scan, letterbox, audio, subpictures, what, captions=(False, False)):
@@ -431,8 +684,8 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True):
     pgcs, cats = [], []
     for m, w in zip(menus, written):
         cat = (0x80 | menus_.ENTRY_TYPES[m.entry]) << 24 if m.entry else 0
-        pgcs.append(_pgc((m.pre, m.post, {}), w, frame, subs, menus_.palette(m), programs=[1],
-                         title=False, uops=m.uops))
+        pgcs.append(_pgc((m.pre, m.post, {}), w, frame, subs, menus_.palette(m), title=False,
+                         uops=m.uops))
         cats.append(cat)
     flags = 0
     for k in kinds:
@@ -450,12 +703,7 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True):
     lu = lu[:4] + struct.pack(">I", o - 1) + lu[8:] + b"".join(pgcs)
     pgci_ut = struct.pack(">HHI", 1, 0, 8 + 8 + len(lu) - 1) + lang + bytes((0, flags)) \
         + struct.pack(">I", 16) + lu
-    c_adt = struct.pack(">HHI", len(written), 0, 8 + 12 * sum(len(w.cells) for w in written) - 1)
-    for w in written:
-        for c in w.cells:
-            c_adt += struct.pack(">HBBII", w.vob_id, c.number, 0, c.first_sector, c.last_sector)
-    admap = [w.first_sector + v.start for w in written for v in w.vobus]
-    admap = struct.pack(">I", 4 + 4 * len(admap) - 1) + struct.pack(f">{len(admap)}I", *admap)
+    c_adt, admap = _address_tables(written)
     attributes = bytearray(0x100)
     attributes[0:2] = video
     struct.pack_into(">H", attributes, 2, audio_count)
@@ -483,13 +731,11 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
             menus, language, 0, pan_scan, letterbox)
     menu_sectors = sum(w.sectors for w in menu_written)
 
-    written, data = [], []
-    offset = 0
+    written = []
+    offset, vob_id = 0, 1
     for n, title in enumerate(titles, 1):
-        w, vob = _prepare(n, n, title.stream, title.chapters, offset)
+        w, offset, vob_id = _title(n, title, offset, vob_id)
         written.append(w)
-        data.append(vob)
-        offset += w.sectors
     frame = written[0].stream.frame
     video, audio_count, audio, sp_count, subpictures, subs = _attributes(
         written, pan_scan, letterbox, [t.audio for t in titles], [t.subpictures for t in titles],
@@ -497,7 +743,8 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
 
     # the tables
     ptt = _table(lambda n, end: struct.pack(">HHI", n, 0, end), 8,
-                 [b"".join(struct.pack(">HH", w.number, c.number) for c in w.cells) for w in written])
+                 [b"".join(struct.pack(">HH", w.number, k) for k in range(1, len(w.programs) + 1))
+                  for w in written])
     pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, subs, t.palette, stills=t.stills,
                  uops=t.uops) for t, w in zip(titles, written)]
     pgci = struct.pack(">HHI", len(pgcs), 0, 0)
@@ -508,12 +755,7 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
     pgci = pgci[:4] + struct.pack(">I", o - 1) + pgci[8:] + b"".join(pgcs)
     tmapt = _table(lambda n, end: struct.pack(">HHI", n, 0, end), 8,
                    [_time_map(w, frame) for w in written])
-    c_adt = struct.pack(">HHI", len(written), 0, 8 + 12 * sum(len(w.cells) for w in written) - 1)
-    for w in written:
-        for c in w.cells:
-            c_adt += struct.pack(">HBBII", w.vob_id, c.number, 0, c.first_sector, c.last_sector)
-    admap = [w.first_sector + v.start for w in written for v in w.vobus]
-    admap = struct.pack(">I", 4 + 4 * len(admap) - 1) + struct.pack(f">{len(admap)}I", *admap)
+    c_adt, admap = _address_tables(written)
 
     order = [("ptt", ptt), ("pgci", pgci)]
     if menus:
@@ -561,16 +803,29 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
         with open(os.path.join(folder, name), "wb") as f:
             f.write(b"".join(menu_data))
         files.append(name)
-    files += _write_vobs(folder, vts, data, written)
+    files += _write_vobs(folder, vts, written)
     for t, w in zip(titles, written):
         w.uops = t.uops
     return Titleset(vts, folder, sectors, vob_sectors, written, ifo[0x100:0x400], files, menu_sectors)
 
 
-def _write_vobs(folder, vts, data, written):
+def _address_tables(written):
+    """VTS(M)_C_ADT (the cells by VOB and cell number, the VOBs counted) and
+    VTS(M)_VOBU_ADMAP (every VOBU's sector, in order)."""
+    cells = sorted((c for w in written for c in w.cells), key=lambda c: (c.vob_id, c.cell_id))
+    vobs = len({c.vob_id for c in cells})
+    c_adt = struct.pack(">HHI", vobs, 0, 8 + 12 * len(cells) - 1)
+    for c in cells:
+        c_adt += struct.pack(">HBBII", c.vob_id, c.cell_id, 0, c.first_sector, c.last_sector)
+    admap = sorted(s for w in written for s in w.vobu_sectors)
+    admap = struct.pack(">I", 4 + 4 * len(admap) - 1) + struct.pack(f">{len(admap)}I", *admap)
+    return c_adt, admap
+
+
+def _write_vobs(folder, vts, written):
     """The title VOBs as VTS_nn_1.VOB, VTS_nn_2.VOB, ... each at most
     VOB_FILE_SECTORS, cut at VOBU starts."""
-    starts = [w.first_sector + v.start for w in written for v in w.vobus]
+    starts = sorted(s for w in written for s in w.vobu_sectors)
     total = written[-1].first_sector + written[-1].sectors
     cuts = [0]
     while total - cuts[-1] > VOB_FILE_SECTORS:
@@ -581,7 +836,10 @@ def _write_vobs(folder, vts, data, written):
     cuts.append(total)
     if len(cuts) - 1 > 9:
         raise VtsError("the titles need more than 9 VOB files (over 9 GiB)")
-    whole = b"".join(data)       # (a copy; titles are read whole as it is)
+    chunks = sorted((c for w in written for c in w.chunks), key=lambda c: c[0])
+    whole = b"".join(bytes(c[1]) for c in chunks)       # (a copy; titles are read whole as it is)
+    if len(whole) != total * SECTOR:
+        raise VtsError("the VOBUs do not fill the title VOBs")
     names = []
     for k, (a, b) in enumerate(zip(cuts, cuts[1:]), 1):
         name = f"VTS_{vts:02d}_{k}.VOB"

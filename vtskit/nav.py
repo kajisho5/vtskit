@@ -85,9 +85,9 @@ def elapsed(ticks, frame):
     return bytes((_bcd(h), _bcd(m), _bcd(s), _bcd(f) | flag))
 
 
-def _search(vs, times, i, first, last):
+def _search(vs, times, i, first, last, pos):
     """VOBU_SRI of VOBU i, its cell being VOBUs first..last (`times`: the
-    start of each VOBU)."""
+    start of each VOBU, `pos`: the sector of each VOBU on the disc)."""
     v = vs[i]
     end = vs[last].e_ptm
 
@@ -107,7 +107,7 @@ def _search(vs, times, i, first, last):
                 beyond = first <= nearer + sign <= last if coarse else False
                 out.append(NONE | (BETWEEN if beyond else 0))
             else:
-                val = VALID | abs(vs[j].start - v.start)
+                val = VALID | abs(pos[j] - pos[i])
                 if coarse and abs(j - nearer) > 1:
                     val |= BETWEEN
                 out.append(val)
@@ -116,16 +116,16 @@ def _search(vs, times, i, first, last):
 
     fwd = entries(1)[::-1]
     bwd = entries(-1)
-    nxt = VALID | (vs[i + 1].start - v.start) if i < last else NONE
-    prv = VALID | (v.start - vs[i - 1].start) if i > first else NONE
-    nvwv = next((VALID | (vs[j].start - v.start) for j in range(i + 1, last + 1) if vs[j].video),
+    nxt = VALID | (pos[i + 1] - pos[i]) if i < last else NONE
+    prv = VALID | (pos[i] - pos[i - 1]) if i > first else NONE
+    nvwv = next((VALID | (pos[j] - pos[i]) for j in range(i + 1, last + 1) if vs[j].video),
                 NO_VIDEO)
-    pvwv = next((VALID | (v.start - vs[j].start) for j in range(i - 1, first - 1, -1)
+    pvwv = next((VALID | (pos[i] - pos[j]) for j in range(i - 1, first - 1, -1)
                  if vs[j].video), NO_VIDEO)
     return [nvwv] + fwd + [nxt, prv] + bwd + [pvwv]
 
 
-def _audio_sync(stream, vs):
+def _audio_sync(stream, vs, pos, final):
     """a_synca of each VOBU: per sound stream (numbered in the order the
     streams first appear), the offset to the stream's last packet stamped
     at or before the VOBU's start (or its first, if none is)."""
@@ -137,15 +137,15 @@ def _audio_sync(stream, vs):
         if not stamped:
             continue
         k = 0
-        for row, v in zip(out, vs):
+        for i, (row, v) in enumerate(zip(out, vs)):
             while k + 1 < len(stamped) and stamped[k + 1][1] <= v.s_ptm:
                 k += 1
-            off = stamped[k][0] - v.start
+            off = final(stamped[k][0]) - pos[i]
             row[n] = off if off >= 0 else 0x8000 | -off
     return out
 
 
-def _subpicture_sync(stream, vs):
+def _subpicture_sync(stream, vs, pos):
     """sp_synca of each VOBU: per subpicture stream (0-31), where the unit
     on screen during the VOBU is: in this VOBU, or nothing on screen
     (7fffffff), or the offset to the VOBU it starts in."""
@@ -154,18 +154,18 @@ def _subpicture_sync(stream, vs):
     for sub, units in stream.subpictures.items():
         n = sub - 0x20
         k = 0
-        for row, v in zip(out, vs):
+        for i, (row, v) in enumerate(zip(out, vs)):
             # (units are in order; skip those gone before this VOBU)
             while k < len(units) and units[k][2] is not None and units[k][2] <= v.s_ptm:
                 k += 1
             val = 0x7FFFFFFF
             for sector, shown, until in units[k:k + 2]:
                 if shown < v.e_ptm and (until is None or until > v.s_ptm):
-                    home = starts[bisect.bisect_right(starts, sector) - 1]
-                    if home > v.start:
-                        val = home - v.start
-                    elif home < v.start:
-                        val = 0x80000000 | (v.start - home)
+                    home = pos[bisect.bisect_right(starts, sector) - 1]
+                    if home > pos[i]:
+                        val = home - pos[i]
+                    elif home < pos[i]:
+                        val = 0x80000000 | (pos[i] - home)
                     break
             row[n] = val
     return out
@@ -174,17 +174,32 @@ def _subpicture_sync(stream, vs):
 HLI = 0x60                 # the highlight information in the PCI data, to 0x316
 
 
-def fill(data, cells, lbn=0, uops=0, stream=None, hli=None):
+def fill(data, cells, lbn=0, uops=0, stream=None, hli=None, layout=None, ilvu=None, nsml=None):
     """Fill the navigation packs of a VOB in place (a bytearray or a
     writable mmap).
 
     `cells`: [(vob id, cell id, first VOBU index, last VOBU index)], every
     VOBU in one cell. `lbn`: the sector of the stream's first pack in the
-    titleset's VOBs. `stream`: the stream already scanned, if it is. `hli`:
-    {vob id: the highlight information (buttons) of its menu, 0x2B6 bytes},
-    written into every navigation pack of that VOB. Returns the VOBUs."""
+    titleset's VOBs, when the VOB lies whole there; `layout`: the sector of
+    each VOBU on the disc instead, when the VOB is interleaved with others.
+    `stream`: the stream already scanned, if it is. `hli`: {vob id: the
+    highlight information (buttons) of its menu, 0x2B6 bytes}, written into
+    every navigation pack of that VOB. `ilvu`: {VOBU index: (flags, end,
+    next start, next size, [(angle's next unit, size)] * 9)}, the SML_PBI
+    and SML_AGLI of a VOBU in or before an interleaved block. `nsml`: {VOBU
+    index: [angle's VOBU] * 9}, the PCI's NSML_AGLI. Returns the VOBUs."""
     stream = stream or ps.scan(data)
     vs = vobus(stream)
+    pos = list(layout) if layout is not None else [lbn + v.start for v in vs]
+    if len(pos) != len(vs):
+        raise VtsError("the layout does not give every VOBU a sector")
+    starts = [v.start for v in vs]
+
+    def final(sector):
+        k = bisect.bisect_right(starts, sector) - 1
+        return pos[k] + sector - vs[k].start
+    ilvu = ilvu or {}
+    nsml = nsml or {}
     covered = [None] * len(vs)
     for cell in cells:
         vob_id, cell_id, first, last = cell
@@ -198,8 +213,8 @@ def fill(data, cells, lbn=0, uops=0, stream=None, hli=None):
         vob_s.setdefault(cell[0], v.s_ptm)
         vob_e[cell[0]] = v.e_ptm
     times = [v.s_ptm for v in vs]
-    sync = _audio_sync(stream, vs)
-    spu = _subpicture_sync(stream, vs)
+    sync = _audio_sync(stream, vs, pos, final)
+    spu = _subpicture_sync(stream, vs, pos)
     for i, v in enumerate(vs):
         vob_id, cell_id, first, last = v.cell
         base = v.start * ps.SECTOR
@@ -208,8 +223,10 @@ def fill(data, cells, lbn=0, uops=0, stream=None, hli=None):
             raise VtsError(f"sector {v.start}: not a navigation pack of PCI and DSI")
         eltm = elapsed(v.s_ptm - vs[first].s_ptm, stream.frame)
         pci = bytearray(0x3D4 - 1)
-        struct.pack_into(">IIIIIII", pci, 0, lbn + v.start, 0, uops,
+        struct.pack_into(">IIIIIII", pci, 0, pos[i], 0, uops,
                          v.s_ptm, v.e_ptm, 0, int.from_bytes(eltm, "big"))
+        if i in nsml:
+            struct.pack_into(">9I", pci, 0x3C, *nsml[i])
         if hli and vob_id in hli:
             if len(hli[vob_id]) != 0x316 - HLI:
                 raise VtsError("the highlight information is 0x2B6 bytes")
@@ -218,10 +235,15 @@ def fill(data, cells, lbn=0, uops=0, stream=None, hli=None):
         # (fewer than three reference pictures: the last one's end again,
         # as dvdauthor writes it)
         refs = v.refs + [v.refs[-1] if v.refs else 0] * (3 - len(v.refs))
-        struct.pack_into(">IIIIIIHxB4s", dsi, 0, v.scr & 0xFFFFFFFF, lbn + v.start,
+        struct.pack_into(">IIIIIIHxB4s", dsi, 0, v.scr & 0xFFFFFFFF, pos[i],
                          v.end - v.start, *refs, vob_id, cell_id, eltm)
+        if i in ilvu:
+            flags, ea, sa, sz, agli = ilvu[i]
+            struct.pack_into(">HIIH", dsi, 0x20, flags, ea, sa, sz)
+            for n, (dsta, size) in enumerate(agli):
+                struct.pack_into(">IH", dsi, 0xB4 + 6 * n, dsta, size)
         struct.pack_into(">II", dsi, 0x2C, vob_s[vob_id], vob_e[vob_id])
-        struct.pack_into(">42I", dsi, 0xEA, *_search(vs, times, i, first, last))
+        struct.pack_into(">42I", dsi, 0xEA, *_search(vs, times, i, first, last, pos))
         struct.pack_into(">8H", dsi, 0x192, *sync[i])
         struct.pack_into(">32I", dsi, 0x1A2, *spu[i])
         data[base + PCI:base + PCI + len(pci)] = pci
