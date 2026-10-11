@@ -69,11 +69,11 @@ def _packets(unit_, pts, sub, scr, like):
     return out, scr
 
 
-def mux(data, streams, lead=LEAD):
-    """The program stream `data` (bytes) with the cues of each subpicture
-    stream added: `streams` is {stream number 0-31: [Cue]}. Returns a
-    bytearray."""
-    data = bytes(data)
+def mux(data, streams, lead=LEAD, out=None):
+    """The program stream `data` (bytes, or a ps.Mapped file) with the cues
+    of each subpicture stream added: `streams` is {stream number 0-31:
+    [Cue]}. Returns a bytearray, or writes into the open file `out` and
+    returns None (a title of gigabytes passes through in blocks)."""
     packs = ps.read_packs(data)
     if not packs or not packs[0].nav:
         raise VtsError("the stream does not start with a navigation pack")
@@ -97,18 +97,30 @@ def mux(data, streams, lead=LEAD):
             k = bisect.bisect_right(scrs, pts - int(lead * 90000))     # after the last pack early enough
             events.append((max(k, 1), pts, 0x20 + number, unit(cue)))
     events.sort(key=lambda e: (e[0], e[1], e[2]))
-    out = bytearray()
+    result = bytearray() if out is None else None
     e = 0
     last_scr = None
-    for k, pack in enumerate(packs):
+    first = bytes(data[:14])
+    k = 0
+    while k < len(packs):
         while e < len(events) and events[e][0] == k:
             _, pts, sub, u = events[e]
-            added, last_scr = _packets(u, pts, sub, last_scr, data[:14])
-            if last_scr >= pack.scr:
+            added, last_scr = _packets(u, pts, sub, last_scr, first)
+            if last_scr >= packs[k].scr:
                 raise VtsError(f"no room in the clock before pack {k} for the subpicture packs")
             for p in added:
-                out += p
+                _emit(result, out, p)
             e += 1
-        out += data[k * ps.SECTOR:(k + 1) * ps.SECTOR]
-        last_scr = pack.scr
-    return out
+        # the stretch of packs up to the next insertion goes through whole
+        nxt = events[e][0] if e < len(events) else len(packs)
+        _emit(result, out, data[k * ps.SECTOR:nxt * ps.SECTOR])
+        last_scr = packs[nxt - 1].scr
+        k = nxt
+    return result
+
+
+def _emit(result, out, data):
+    if out is None:
+        result += data
+    else:
+        out.write(data)

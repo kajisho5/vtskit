@@ -77,7 +77,9 @@ oncemore writing its discs with vtskit.
   a program chain a title (programs and cells one a chapter, its pre, post
   and cell commands given as bytes), the time maps, the cell and VOBU
   address tables. A chapter starts at the VOBU nearest its time, as
-  dvdauthor places it. With menus (`vtskit.menu`: a Menu's stream, its
+  dvdauthor places it. A title's stream is read through a memory map and
+  copied out in blocks, its navigation packs kept aside, so a title of
+  gigabytes is not held in memory. With menus (`vtskit.menu`: a Menu's stream, its
   Buttons with their rectangles, arrow-key neighbours and commands, its
   cells and which remote key it answers) it also writes the menu VOB, with
   the button overlay as a subpicture (`vtskit.spu`; invisible until a

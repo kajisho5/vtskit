@@ -206,11 +206,49 @@ class TestPieces(unittest.TestCase):
             self.assertEqual(stripped[sector * ps.SECTOR:(sector + 1) * ps.SECTOR],
                              whole[sector * ps.SECTOR:(sector + 1) * ps.SECTOR], f"navigation pack {sector}")
 
+    def test_mapped_stream(self):
+        # a file mapped read-only: writes are kept aside, reads and the
+        # copy written out see them, the file does not change
+        tmp = tempfile.mkdtemp(prefix="vtskit-mapped-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "s.bin")
+        original = bytes(range(256)) * 32                      # 8 KiB
+        with open(path, "wb") as f:
+            f.write(original)
+        with ps.Mapped(path) as m:
+            self.assertEqual(len(m), len(original))
+            self.assertEqual(m[100:200], original[100:200])
+            m[1000:1010] = b"A" * 10
+            m[1010:1030] = b"B" * 20
+            m[5000:5003] = b"CCC"
+            with self.assertRaises(VtsError):
+                m[0:4] = b"too long"
+            expect = bytearray(original)
+            expect[1000:1010] = b"A" * 10
+            expect[1010:1030] = b"B" * 20
+            expect[5000:5003] = b"CCC"
+            self.assertEqual(m[0:len(m)], bytes(expect))
+            self.assertEqual(m[1005:1015], bytes(expect[1005:1015]))    # across two patches
+            self.assertEqual(m[990:1000], bytes(expect[990:1000]))      # up to a patch
+            self.assertEqual(m[1029], expect[1029])
+            out = os.path.join(tmp, "out.bin")
+            with open(out, "wb") as f:
+                m.write(f, 500, 5002, block=700)                         # blocks cut the patches
+            with open(out, "rb") as f:
+                self.assertEqual(f.read(), bytes(expect[500:5002]))
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), original)
+        with open(os.path.join(tmp, "empty"), "wb"):
+            pass
+        with self.assertRaises(VtsError):
+            ps.Mapped(os.path.join(tmp, "empty"))
+
     def test_padding_dropped(self):
         pack = bytearray(2048)
         pack[:14] = bytes.fromhex("000001ba4400040004010189c3f8")
         pack[14:20] = b"\x00\x00\x01\xbe" + (2048 - 20).to_bytes(2, "big")
         self.assertEqual(ps.drop_padding(bytes(pack) * 3), b"")
+        self.assertTrue(ps.has_padding(bytes(pack)))
         self.assertEqual(ps.read_packs(bytes(pack))[0].pes, [])
 
 

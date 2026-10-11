@@ -165,7 +165,7 @@ class WrittenTitle:
     uops: int = 0
     programs: list = field(default_factory=list)    # the entry cell of each program
     angles: int = 1
-    chunks: list = field(default_factory=list)      # (sector, bytes) to lay on the disc
+    chunks: list = field(default_factory=list)      # (sector, buffer, first byte, end) to lay on the disc
     timeline: list = field(default_factory=list)    # (tick from the start, sector, cell number) of each VOBU played
     end: int = 0                                    # ticks from the start to the end, the sound included
     vobu_sectors: list = field(default_factory=list)
@@ -446,18 +446,32 @@ def _prepare(number, vob_id, path, cell_times, offset, extra=None, hli=None):
     timeline = [(v.s_ptm - s0, offset + v.start, c.number) for c in cells
                 for v in vs[c.first_vobu:c.last_vobu + 1]]
     w = WrittenTitle(number, vob_id, stream.sectors, offset, cells, vs, stream, programs=[1],
-                     chunks=[(offset, vob)], timeline=timeline, end=vs[-1].e_ptm - s0,
+                     chunks=[(offset, vob, 0, len(vob))], timeline=timeline, end=vs[-1].e_ptm - s0,
                      vobu_sectors=[offset + v.start for v in vs])
     return w, vob
 
 
 
 def _load(path):
-    with open(path, "rb") as f:
-        vob = ps.drop_padding(f.read())
-    stream = ps.scan(vob)
-    vs = nav.vobus(stream)
+    """A title's stream: mapped from its file, its navigation packs to be
+    filled aside (ps.Mapped), unless it has packs of padding alone to drop,
+    which takes a copy in memory."""
+    vob = ps.Mapped(path)
+    try:
+        if ps.has_padding(vob):
+            vob, mapped = ps.drop_padding(vob), vob
+            mapped.close()
+        stream = ps.scan(vob)
+        vs = nav.vobus(stream)
+    except BaseException:
+        _close(vob)
+        raise
     return stream, vs, vob
+
+
+def _close(buffer):
+    if isinstance(buffer, ps.Mapped):
+        buffer.close()
 
 
 def _aligned(loaded, where):
@@ -638,10 +652,10 @@ def _title(number, title, offset, vob_id):
                  nsml=nsml_info[(k, a)])
         lay = layouts[(k, a)]
         if len(loaded[k]) == 1:
-            chunks.append((lay[0], vob))
+            chunks.append((lay[0], vob, 0, len(vob)))
         else:
             for i, v in enumerate(vs):
-                chunks.append((lay[i], vob[v.start * SECTOR:(v.end + 1) * SECTOR]))
+                chunks.append((lay[i], vob, v.start * SECTOR, (v.end + 1) * SECTOR))
     # a chapter's last cells: those of its last stretch (every angle of it)
     last = {}
     for c in cells:
@@ -769,10 +783,19 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
     if not titles or len(titles) > 99:
         raise VtsError("a titleset holds 1 to 99 titles")
     written = []
-    offset, vob_id = 0, 1
-    for n, title in enumerate(titles, 1):
-        w, offset, vob_id = _title(n, title, offset, vob_id)
-        written.append(w)
+    try:
+        offset, vob_id = 0, 1
+        for n, title in enumerate(titles, 1):
+            w, offset, vob_id = _title(n, title, offset, vob_id)
+            written.append(w)
+        return _write(folder, vts, titles, written, menus, language, pan_scan, letterbox, captions)
+    finally:
+        for w in written:
+            for _, buffer, _, _ in w.chunks:
+                _close(buffer)
+
+
+def _write(folder, vts, titles, written, menus, language, pan_scan, letterbox, captions):
     frame = written[0].stream.frame
     video, audio_count, audio, sp_count, subpictures, subs = _attributes(
         written, pan_scan, letterbox, [t.audio for t in titles], [t.subpictures for t in titles],
@@ -812,7 +835,7 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
     for (name, _), t in zip(order, tables):
         pointers[name] = sectors
         sectors += len(t) // SECTOR
-    vob_sectors = offset
+    vob_sectors = written[-1].first_sector + written[-1].sectors
     mat = bytearray(SECTOR)
     mat[:12] = b"DVDVIDEO-VTS"
     struct.pack_into(">I", mat, 0x0C, 2 * sectors + menu_sectors + vob_sectors - 1)
@@ -880,13 +903,25 @@ def _write_vobs(folder, vts, written):
     if len(cuts) - 1 > 9:
         raise VtsError("the titles need more than 9 VOB files (over 9 GiB)")
     chunks = sorted((c for w in written for c in w.chunks), key=lambda c: c[0])
-    whole = b"".join(bytes(c[1]) for c in chunks)       # (a copy; titles are read whole as it is)
-    if len(whole) != total * SECTOR:
+    at = 0
+    for sector, _, start, stop in chunks:
+        if sector != at or (stop - start) % SECTOR:
+            raise VtsError("the VOBUs do not fill the title VOBs")
+        at += (stop - start) // SECTOR
+    if at != total:
         raise VtsError("the VOBUs do not fill the title VOBs")
     names = []
     for k, (a, b) in enumerate(zip(cuts, cuts[1:]), 1):
         name = f"VTS_{vts:02d}_{k}.VOB"
         with open(os.path.join(folder, name), "wb") as f:
-            f.write(whole[a * SECTOR:b * SECTOR])
+            for sector, buffer, start, stop in chunks:
+                lo = max(a * SECTOR, sector * SECTOR) - sector * SECTOR + start
+                hi = min(b * SECTOR, sector * SECTOR + stop - start) - sector * SECTOR + start
+                if lo >= hi:
+                    continue
+                if isinstance(buffer, ps.Mapped):
+                    buffer.write(f, lo, hi)
+                else:
+                    f.write(memoryview(buffer)[lo:hi])
         names.append(name)
     return names
