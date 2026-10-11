@@ -30,6 +30,16 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 
 資料に書かれていないことは、dvdauthor が書き出したバイト列を観察して決めます。dvdauthor・libdvdread・libdvdnav のソースは読みません。libdvdnav は、書き出したディスクを再生して確かめるテストにだけ、公開 API（`dvdnav.h` の関数宣言）を通して使います。
 
+## インストール
+
+vtskit は標準ライブラリだけの Python パッケージです（3.11 以降）。PyPI に出るまでは次で入ります。
+
+```
+pip install git+https://github.com/kajisho5/vtskit
+```
+
+このリポジトリに `v*` タグを打つとパッケージをビルドし、GitHub リリースに添えて PyPI に公開します（`.github/workflows/release.yml`）。最初の PyPI 公開には、PyPI 側でこのリポジトリを trusted publisher として登録しておく必要があります。oncemore は vtskit をインストールせず、`vtskit/` の写しを `oncemore/_vendor/vtskit` として持ち、`tools/vendor_vtskit.py` で更新します。
+
 ## いまあるもの
 
 計画の 4 ステップがすべて入り、タイトル、メニュー、字幕、アングルのあるディスクを書け、dvdauthor の命令言語も変換でき、oncemore はこれでディスクを書いています。

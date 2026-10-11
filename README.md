@@ -65,6 +65,22 @@ is not read, nor libdvdread's or libdvdnav's. libdvdnav is only used in the
 tests, through its public API (the function declarations of `dvdnav.h`), to
 play the discs vtskit writes.
 
+## Installing
+
+vtskit is one package of plain Python (3.11 or later), with nothing else
+to install. Until it is on PyPI:
+
+```
+pip install git+https://github.com/kajisho5/vtskit
+```
+
+A tag `v*` on this repository builds the package, attaches it to a GitHub
+release and publishes it to PyPI (`.github/workflows/release.yml`); the
+first PyPI release needs the project registered there with this
+repository as its trusted publisher. oncemore does not install vtskit: it
+carries a copy of `vtskit/` as `oncemore/_vendor/vtskit`, updated with its
+`tools/vendor_vtskit.py`.
+
 ## What is here now
 
 The four steps of the plan are in: discs with titles, menus, subtitles and
