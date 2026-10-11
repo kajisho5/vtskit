@@ -1,11 +1,12 @@
 """vtskit: DVD-Video titlesets in pure Python.
 
-Steps 1 and 3 of the plan in the README, a disc with titles and menus:
+Steps 1 to 3 of the plan in the README, a disc with titles, menus and
+angles:
 
 * `vtskit.titleset`: a titleset written from its titles' program streams
-  and its menus: the VOBs with their navigation packs filled, the IFO and
-  its BUP (`vtskit.menu` describes a menu and its buttons, `vtskit.spu`
-  draws the button overlay).
+  (several parts in a row, with angle blocks) and its menus: the VOBs with
+  their navigation packs filled, the IFO and its BUP (`vtskit.menu`
+  describes a menu and its buttons, `vtskit.spu` draws the button overlay).
 * `vtskit.vmg`: the video manager (VIDEO_TS.IFO, its BUP, the title
   menu's VOB).
 * `vtskit.vm`: the navigation commands a program chain carries, encoded.

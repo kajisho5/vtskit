@@ -65,6 +65,7 @@ def _declare(lib):
         "dvdnav_wait_skip": (ctypes.c_int, [P]),
         "dvdnav_current_title_info": (ctypes.c_int, [P, i32p, i32p]),
         "dvdnav_current_title_program": (ctypes.c_int, [P, i32p, i32p, i32p]),
+        "dvdnav_get_current_nav_dsi": (ctypes.c_void_p, [P]),
         "dvdnav_get_current_nav_pci": (P, [P]),
         "dvdnav_button_select": (ctypes.c_int, [P, P, ctypes.c_int32]),
         "dvdnav_button_activate": (ctypes.c_int, [P, P]),
@@ -203,6 +204,16 @@ class DvdSim:
         n = ctypes.c_int32()
         self.lib.dvdnav_get_number_of_parts(self.h, title, ctypes.byref(n))
         return n.value
+
+    def vob_cell(self):
+        """(VOB number, cell number) of the current navigation pack, from its
+        DSI (dsi_t: the general information first: SCR, LBN, four end
+        addresses, then VOB_IDN at 24 and C_IDN at 27, in the host's order)."""
+        dsi = self.lib.dvdnav_get_current_nav_dsi(self.h)
+        if not dsi:
+            return None
+        raw = ctypes.string_at(dsi, 28)
+        return int.from_bytes(raw[24:26], sys.byteorder), raw[27]
 
     def num_angles(self, title):
         """The angles of a title, as the player counts them."""

@@ -64,8 +64,8 @@ play the discs vtskit writes.
 
 ## What is here now
 
-Steps 1 and 3 of the plan are in: discs with titles and menus, and what
-they are checked with.
+Steps 1 to 3 of the plan are in: discs with titles, menus and angles, and
+what they are checked with.
 
 * `vtskit.titleset` writes a titleset: the title VOBs (one a title, cut
   into files under 1 GiB) with their navigation packs filled, and
@@ -77,8 +77,11 @@ they are checked with.
   Buttons with their rectangles, arrow-key neighbours and commands, its
   cells and which remote key it answers) it also writes the menu VOB, with
   the button overlay as a subpicture (`vtskit.spu`) and the highlight
-  information in every navigation pack, and the menu tables of the IFO.
-  Angles are not written yet.
+  information in every navigation pack, and the menu tables of the IFO. A
+  title may be several parts in a row, streams and `Angles` blocks of 2 to
+  9 streams: an angle block is interleaved on the disc, its navigation
+  packs point from each unit to every angle's next, and its cells are
+  marked as an angle block.
 * `vtskit.vmg` writes the video manager: VIDEO_TS.IFO and its BUP, with
   the first-play commands, the table of titles and the titlesets'
   attributes, and VIDEO_TS.VOB with the title menu when there is one. With
@@ -104,9 +107,12 @@ compiles for the same statement; for menus, the highlight information of
 every navigation pack and the IFOs' menu tables are dvdauthor's (its
 buttons made with spumux). A VIDEO_TS written by vtskit alone plays its
 titles and chapters in order under libdvdnav, its commands jumping between
-titles, and its menus' buttons lead where they say
+titles, and its menus' buttons lead where they say; a title with an angle
+block plays and switches angles under libdvdnav, every pointer of its
+navigation packs landing on the unit it names (dvdauthor writes no angles,
+so a set-top player is the check still owed)
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
-it needs is missing). Angles come next.
+it needs is missing). oncemore's switch to vtskit comes next.
 
 `vtskit.ifo` and `tests/dvdnav_sim.py` come from
 [oncemore](https://github.com/kajisho5/oncemore) (its `layerbreak.py` and
