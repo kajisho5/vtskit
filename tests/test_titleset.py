@@ -223,6 +223,8 @@ class TestAgainstDvdauthor(unittest.TestCase):
             titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, audio=(Audio("eng"),))])
         with self.assertRaisesRegex(VtsError, "8 bytes"):
             titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, post=(b"\x30",))])
+        with self.assertRaisesRegex(VtsError, "JumpTT"):
+            titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, post=vm.assemble([vm.jump_tt(1)]))])
         with self.assertRaisesRegex(VtsError, "cell command"):
             titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, cell_commands={2: titleset.EXIT})])
         pal = os.path.join(self.tmp, "b.mpg")
