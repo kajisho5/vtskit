@@ -1,0 +1,35 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>vtskit</title>
+<style>
+@font-face{font-family:Outfit;font-weight:600;src:url(fonts/Outfit-600.ttf)}
+@font-face{font-family:Outfit;font-weight:700;src:url(fonts/Outfit-700.ttf)}
+@font-face{font-family:Outfit;font-weight:500;src:url(fonts/Outfit-500.ttf)}
+*{box-sizing:border-box}
+body{margin:0;width:1280px;height:640px;overflow:hidden;background:#181b22;color:#f2f2f2;
+ font-family:Outfit,"Noto Sans CJK JP",sans-serif;position:relative}
+.left{position:absolute;left:72px;top:64px;width:560px}
+.lockup{height:100px;margin-left:-14px}
+h1{font-weight:700;font-size:52px;line-height:1.12;margin:56px 0 0;letter-spacing:-.01em}
+:lang(ja) h1{font-size:42px;line-height:1.32;font-family:"Noto Sans CJK JP",sans-serif;font-weight:700;letter-spacing:0}
+h1 em{font-style:normal;color:#ffd400;white-space:nowrap}
+p{font-weight:500;font-size:23px;line-height:1.4;color:#a9adb7;margin:22px 0 0}
+:lang(ja) p{font-family:"Noto Sans CJK JP",sans-serif;font-size:21px;line-height:1.6}
+.pills{position:absolute;left:72px;bottom:64px;display:flex;gap:14px}
+.pill{border:2px solid #3a3f4a;border-radius:999px;padding:7px 20px;font-size:21px;font-weight:600;color:#e6e6e6}
+.card{position:absolute;left:676px;top:96px;width:640px;height:448px;border:8px solid #ffd400;border-radius:28px;
+ background:#0f1116;padding:40px 44px;font-family:"DejaVu Sans Mono",monospace;font-size:18px;line-height:1.75;color:#e6e6e6;white-space:pre;overflow:hidden}
+.card .dots{display:flex;gap:9px;margin:-14px 0 22px}.card .dots i{width:13px;height:13px;border-radius:50%;background:#3a3f4a;display:block}
+.k{color:#ffd400}.c{color:#8a8f9e}
+.fam{position:absolute;right:56px;bottom:36px;font-size:17px;color:#8a8f9e;font-weight:500}
+</style><body>
+<div class="left"><img class="lockup" src="logo/lockup-dark.svg" alt="vtskit">
+<h1><span style="white-space:nowrap">DVD-Video</span> authoring<br>in <em>pure Python.</em></h1><p>Planned: IFO files, navigation packs, menus and commands, from the published format. <span style="white-space:nowrap">Multi-angle</span> titles first.</p></div>
+<div class="pills"><span class="pill">DVD-Video</span><span class="pill">Planned</span><span class="pill">LGPL-3.0</span></div>
+<div class="card"><div class="dots"><i></i><i></i><i></i></div><span class="k">1</span> titleset writer: VOBs, NAV packs, VTS IFO
+  first for titles with several angles
+<span class="k">2</span> ordinary titles, compared with dvdauthor
+<span class="k">3</span> menus, the VMG, a navigation compiler
+<span class="k">4</span> oncemore without dvdauthor
+
+<span class="c"># every disc played back in libdvdnav</span></div>
+<div class="fam">a library of oncemore</div>
+</body></html>

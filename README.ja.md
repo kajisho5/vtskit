@@ -1,3 +1,5 @@
+<p><img src="docs/images/logo/lockup-dark.svg" alt="vtskit" height="56"></p>
+
 # vtskit
 
 **計画中：** Python だけで DVD-Video をオーサリングするライブラリです。IFO ファイル、VOB のナビゲーションパック、メニュー、DVD のナビゲーション命令まで、VIDEO_TS を自前で書き出す予定です。このリポジトリには今は計画だけがあり、コードはまだありません。
@@ -18,6 +20,12 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 4. **oncemore から dvdauthor を外します。**
 
 **独自に実装します：** DVD-Video 形式の公開資料をもとに書き、dvdauthor・libdvdread・libdvdnav のソースは参考にしません。libdvdnav は、書き出したディスクを再生して確かめるテストにだけ使います。
+
+## 支援する
+
+vtskit は無料で、これからも無料です。役に立ったら [GitHub Sponsors](https://github.com/sponsors/kajisho5)（このリポジトリ上部の **Sponsor** ボタン）から開発を支援できます。不具合の報告も同じくらい助かります：[Issues](https://github.com/kajisho5/vtskit/issues)。
+
+ロゴ・色・文章の決まりは [docs/DESIGN.md](docs/DESIGN.md)（英語）にあります。
 
 ## ライセンス
 
