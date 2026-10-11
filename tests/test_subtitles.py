@@ -141,6 +141,13 @@ class TestAgainstSpumux(unittest.TestCase):
         # placed where spumux places them (its padding packs dropped)
         self.assertEqual([x[0] for x in a], [x[0] for x in b])
 
+    def test_written_to_a_file_the_same(self):
+        # a mapped stream muxed into a file: the same bytes
+        path = os.path.join(self.tmp, "out.mpg")
+        with ps.Mapped(self.plain) as m, open(path, "wb") as f:
+            self.assertIsNone(subtitles.mux(m, self.vcues, out=f))
+        self.assertEqual(read(path), bytes(self.mine))
+
     def test_other_packs_untouched(self):
         plain = read(self.plain)
         spus = {x[0] for x in spu_packs(self.mine)}

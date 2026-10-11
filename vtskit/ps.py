@@ -13,6 +13,9 @@ headers) and 13818-2 (sequence, GOP and picture headers); the DVD's own
 use of private streams is described at https://dvdnav.mplayerhq.hu/dvdinfo/.
 """
 
+import bisect
+import mmap
+
 from .errors import VtsError
 
 SECTOR = 2048
@@ -92,22 +95,106 @@ def read_packs(data):
     return list(iter_packs(data))
 
 
+def _only_padding(p):
+    """Whether a pack holds nothing but padding packets."""
+    o = 14 + (p[13] & 7)
+    while o + 6 <= SECTOR and p[o:o + 3] == b"\x00\x00\x01":
+        if p[o + 3] != 0xBE:
+            return False
+        o += 6 + int.from_bytes(p[o + 4:o + 6], "big")
+    return True
+
+
+def has_padding(data):
+    """Whether the stream has packs of padding alone."""
+    return any(_only_padding(data[i * SECTOR:(i + 1) * SECTOR]) for i in range(len(data) // SECTOR))
+
+
 def drop_padding(data):
     """The stream without its packs of padding alone (spumux leaves some;
     a VOB has none). Every other pack keeps its order."""
     out = bytearray()
     for i in range(len(data) // SECTOR):
         p = data[i * SECTOR:(i + 1) * SECTOR]
-        o = 14 + (p[13] & 7)
-        only_padding = True
-        while o + 6 <= SECTOR and p[o:o + 3] == b"\x00\x00\x01":
-            if p[o + 3] != 0xBE:
-                only_padding = False
-                break
-            o += 6 + int.from_bytes(p[o + 4:o + 6], "big")
-        if not only_padding:
+        if not _only_padding(p):
             out += p
     return out
+
+
+class Mapped:
+    """A stream file mapped read-only, with what vtskit writes into it (the
+    navigation packs) kept aside: a slice read sees the writes, and `write`
+    copies the stream with them into a file, so a title of gigabytes is
+    never held in memory. Slices are assigned the bytes they are long, as
+    `nav.fill` assigns them."""
+
+    def __init__(self, path):
+        self.file = open(path, "rb")
+        try:
+            self.map = mmap.mmap(self.file.fileno(), 0, access=mmap.ACCESS_READ)
+        except (ValueError, OSError) as e:            # an empty file cannot be mapped
+            self.file.close()
+            raise VtsError(f"{path}: {e}")
+        self.patches = {}                              # offset -> bytes
+        self.offsets = []                              # the offsets, sorted
+
+    def __len__(self):
+        return len(self.map)
+
+    def close(self):
+        self.map.close()
+        self.file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def _patched(self, start, stop, out):
+        """Apply the patches overlapping [start, stop) to `out`, the bytes
+        of that range."""
+        k = bisect.bisect_right(self.offsets, start) - 1
+        if k >= 0 and self.offsets[k] + len(self.patches[self.offsets[k]]) <= start:
+            k += 1
+        k = max(k, 0)
+        while k < len(self.offsets) and self.offsets[k] < stop:
+            o = self.offsets[k]
+            b = self.patches[o]
+            a0, a1 = max(o, start), min(o + len(b), stop)
+            if a0 < a1:
+                out[a0 - start:a1 - start] = b[a0 - o:a1 - o]
+            k += 1
+        return out
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            start, stop, step = key.indices(len(self.map))
+            if step != 1:
+                raise VtsError("a stream is read in whole slices")
+            data = self.map[start:stop]
+            if not self.offsets:
+                return data
+            return bytes(self._patched(start, stop, bytearray(data)))
+        return self[key:key + 1][0]
+
+    def __setitem__(self, key, value):
+        if not isinstance(key, slice):
+            raise VtsError("a stream is written in whole slices")
+        start, stop, step = key.indices(len(self.map))
+        value = bytes(value)
+        if step != 1 or len(value) != stop - start:
+            raise VtsError("a slice is given the bytes it is long")
+        if start not in self.patches:
+            bisect.insort(self.offsets, start)
+        self.patches[start] = value
+
+    def write(self, f, start=0, stop=None, block=1 << 23):
+        """Copy [start, stop) of the stream, as patched, into the open file `f`."""
+        stop = len(self.map) if stop is None else stop
+        for a in range(start, stop, block):
+            b = min(a + block, stop)
+            f.write(self[a:b])
 
 
 class Picture:
