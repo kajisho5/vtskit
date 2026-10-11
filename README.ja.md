@@ -38,7 +38,7 @@ vtskit は標準ライブラリだけの Python パッケージです（3.11 以
 pip install git+https://github.com/kajisho5/vtskit
 ```
 
-このリポジトリに `v*` タグを打つとパッケージをビルドし、GitHub リリースに添えて PyPI に公開します（`.github/workflows/release.yml`）。最初の PyPI 公開には、PyPI 側でこのリポジトリを trusted publisher として登録しておく必要があります。oncemore は vtskit をインストールせず、`vtskit/` の写しを `oncemore/_vendor/vtskit` として持ち、`tools/vendor_vtskit.py` で更新します。
+リリースはバージョン番号で決まります。`pyproject.toml`（と `vtskit/__init__.py`）のバージョンがまだタグの無い番号で `main` に入ると、`.github/workflows/release.yml` がテスト・ビルド・タグ付きの GitHub リリース・PyPI 公開まで行います。バージョンを上げた PR をマージするだけで済みます（手で `v*` タグを打っても同じように動きます）。PyPI 側にはこのリポジトリとワークフローが trusted publisher として登録してあります。oncemore は vtskit をインストールせず、`vtskit/` の写しを `oncemore/_vendor/vtskit` として持ち、`tools/vendor_vtskit.py` で更新します。
 
 ## いまあるもの
 
