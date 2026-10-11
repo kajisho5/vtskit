@@ -58,6 +58,24 @@ is not read, nor libdvdread's or libdvdnav's. libdvdnav is only used in the
 tests, through its public API (the function declarations of `dvdnav.h`), to
 play the discs vtskit writes.
 
+## What is here now
+
+Nothing is written yet. The first pieces are what the writer will be
+checked with:
+
+* `vtskit.ifo` reads where each chapter of each title starts, as a sector of
+  the disc, from the IFO files.
+* `tests/dvdnav_sim.py` plays a disc with libdvdnav through ctypes: titles,
+  chapters, menus and buttons, sound and subtitle tracks, and angles.
+
+The tests build a disc with ffmpeg and dvdauthor and check both against it
+(`python -m unittest discover -s tests -t .`; a test is skipped when a tool
+it needs is missing).
+
+Both come from [oncemore](https://github.com/kajisho5/oncemore) (its
+`layerbreak.py` and `tests/dvdnav_sim.py`, GPL-3.0 there) and are
+relicensed here under LGPL-3.0-or-later by their author.
+
 ## Support
 
 vtskit is free and stays free. If it saves you time, you can support its
