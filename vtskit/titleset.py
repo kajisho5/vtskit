@@ -636,16 +636,19 @@ def _title(number, title, offset, vob_id):
 
 def _attributes(written, pan_scan, letterbox, audio, subpictures, what, captions=(False, False)):
     """(video attr, audio count, audio attrs, subpicture count, subpicture
-    attrs, sub-streams) of the first VOB; every other must agree."""
+    attrs, sub-streams) of the VOBs: the picture the same in every one, the
+    sound and subpicture streams those of the VOB with the most, of which
+    every other VOB has the first ones."""
     first = written[0].stream
     video = _video_attributes(first, pan_scan, letterbox, captions)
-    audio_count, audio_bytes = _audio_attributes(first, audio[0])
-    sp_count, sp_bytes, subs = _subpicture_attributes(first, subpictures[0])
-    for w, a, sp in zip(written[1:], audio[1:], subpictures[1:]):
+    audios = [_audio_attributes(w.stream, a) for w, a in zip(written, audio)]
+    sps = [_subpicture_attributes(w.stream, sp) for w, sp in zip(written, subpictures)]
+    audio_count, audio_bytes = max(audios, key=lambda x: x[0])
+    sp_count, sp_bytes, subs = max(sps, key=lambda x: x[0])
+    for w, (n, a), (m, sp, _) in zip(written[1:], audios[1:], sps[1:]):
         same = (w.stream.frame == first.frame
                 and _video_attributes(w.stream, pan_scan, letterbox, captions) == video
-                and _audio_attributes(w.stream, a) == (audio_count, audio_bytes)
-                and _subpicture_attributes(w.stream, sp)[:2] == (sp_count, sp_bytes))
+                and a[:8 * n] == audio_bytes[:8 * n] and sp[:6 * m] == sp_bytes[:6 * m])
         if not same:
             raise VtsError(f"{what} {w.number} differs in its streams from {what} 1 "
                            "(one titleset, one set of attributes)")
@@ -764,8 +767,8 @@ def write(folder, vts, titles, menus=(), language="en", pan_scan=True, letterbox
     ptt = _table(lambda n, end: struct.pack(">HHI", n, 0, end), 8,
                  [b"".join(struct.pack(">HH", w.number, k) for k in range(1, len(w.programs) + 1))
                   for w in written])
-    pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, subs, t.palette, stills=t.stills,
-                 uops=t.uops) for t, w in zip(titles, written)]
+    pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, sorted(w.stream.subpictures), t.palette,
+                 stills=t.stills, uops=t.uops) for t, w in zip(titles, written)]
     pgci = struct.pack(">HHI", len(pgcs), 0, 0)
     o = 8 + 8 * len(pgcs)
     for w, p in zip(written, pgcs):
