@@ -64,7 +64,7 @@ play the discs vtskit writes.
 
 ## What is here now
 
-Step 1 is under way: titlesets without menus, and what they are checked with.
+Step 1 is done: a disc without menus, and what it is checked with.
 
 * `vtskit.titleset` writes a titleset: the title VOBs (one a title, cut
   into files under 1 GiB) with their navigation packs filled, and
@@ -72,7 +72,11 @@ Step 1 is under way: titlesets without menus, and what they are checked with.
   a program chain a title (programs and cells one a chapter, its pre, post
   and cell commands given as bytes), the time maps, the cell and VOBU
   address tables. A chapter starts at the VOBU nearest its time, as
-  dvdauthor places it. Angles, menus and the VMG are not written yet.
+  dvdauthor places it. Angles and menus are not written yet.
+* `vtskit.vmg` writes the video manager of a disc without menus:
+  VIDEO_TS.IFO and its BUP, with the first-play commands, the table of
+  titles and the titlesets' attributes. With `vtskit.titleset` it writes a
+  whole VIDEO_TS.
 * `vtskit.vm` encodes the navigation commands (dvdinfo vmi.html): jumps,
   calls and links, the system and general registers, and `If` blocks
   assembled into Goto lines the way dvdauthor compiles its language.
@@ -89,12 +93,12 @@ The tests give the same titles to dvdauthor and to vtskit, and the IFO and
 the VOBs must be the same byte for byte: NTSC and PAL, 4:3 and 16:9,
 chapters on and between VOBU starts, two titles in a titleset, AC-3, LPCM
 and MPEG sound with languages, B-pictures, short GOPs, a 40-second title,
-a subtitle track; every command form is the bytes dvdauthor compiles for
-the same statement. A disc made of dvdauthor's VMG and vtskit's titleset
-plays its chapters in order under libdvdnav, and its commands jump between
-its titles
+a subtitle track, two titlesets; every command form is the bytes dvdauthor
+compiles for the same statement. A VIDEO_TS written by vtskit alone plays
+its titles and chapters in order under libdvdnav, its commands jumping
+between titles
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
-it needs is missing). The VMG comes next.
+it needs is missing). Menus come next, then angles.
 
 `vtskit.ifo` and `tests/dvdnav_sim.py` come from
 [oncemore](https://github.com/kajisho5/oncemore) (its `layerbreak.py` and

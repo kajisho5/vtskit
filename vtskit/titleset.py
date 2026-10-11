@@ -229,6 +229,11 @@ def _pgc(title, written, frame, audio_count, subs):
     for c in (*title.pre, *title.post, *cell_commands):
         if len(c) != 8:
             raise VtsError("a VM command is 8 bytes")
+        # (a title may jump within its titleset, call a menu or the first
+        # play chain, or exit; JumpTT and JumpSS belong to menus, and a
+        # player stops on them: libdvdnav asserts)
+        if c[0] == 0x30 and c[1] & 0x0F in (2, 6):
+            raise VtsError("a title cannot JumpTT or JumpSS: call a menu or the first-play chain")
     if len(cells) > 255:
         raise VtsError(f"{len(cells)} chapters (a program chain has at most 255 cells)")
     head = bytearray(0xEC)
