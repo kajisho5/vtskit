@@ -74,10 +74,13 @@ to install. Until it is on PyPI:
 pip install git+https://github.com/kajisho5/vtskit
 ```
 
-A tag `v*` on this repository builds the package, attaches it to a GitHub
-release and publishes it to PyPI (`.github/workflows/release.yml`); the
-first PyPI release needs the project registered there with this
-repository as its trusted publisher. oncemore does not install vtskit: it
+A release is made by the version: when the version in `pyproject.toml`
+(and `vtskit/__init__.py`) reaches `main` without a tag of its own,
+`.github/workflows/release.yml` runs the tests, builds the package, makes
+the GitHub release with its tag and publishes to PyPI. Merging the version
+bump is the whole act; a tag `v*` pushed by hand releases the same way.
+PyPI knows this repository and workflow as the project's trusted
+publisher. oncemore does not install vtskit: it
 carries a copy of `vtskit/` as `oncemore/_vendor/vtskit`, updated with its
 `tools/vendor_vtskit.py`.
 
