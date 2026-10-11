@@ -13,7 +13,14 @@ checks the bytes against dvdauthor's for each form):
   the Set families with a register or a number);
 * otherwise `If` becomes a Goto past the body on the opposite comparison,
   and a Goto needs a line to land on, so a NOP ends a program whose last
-  instruction is conditional.
+  instruction is conditional;
+* a Set (of a general register or a system register) followed by a Link
+  within the domain (LinkPGCN, LinkCN, LinkTailPGC, RSM, ...), neither
+  comparing, becomes the one "set then link" command (`g1 = 0; jump menu
+  2;` is one command in dvdauthor's output).
+
+`Label` and `Goto` place a program's own branches (a menu's button
+dispatcher).
 
 Registers: `GPRM(n)` is general register n (0-15), `SPRM(n)` system
 register n (0-23); a plain int is a number.
@@ -356,10 +363,41 @@ class Any:
     orelse: list = ()
 
 
+@dataclass(frozen=True)
+class Label:
+    """A place a Goto lands on; `name` is any hashable."""
+    name: object
+
+
+@dataclass(frozen=True)
+class Goto:
+    """Go to the Label `name`, when `condition` holds (always if None)."""
+    name: object
+    condition: object = None
+
+
 def _transfers(ins):
     """Whether this instruction always leaves the command list."""
     return isinstance(ins, Instruction) and ins.condition is None and \
-        (ins.kind == "jump" or (ins.kind == "link" and ins.body[1] & 0x0F))
+        (ins.kind == "jump" or (ins.kind in ("link", "set", "gprm") and ins.body[1] & 0x0F))
+
+
+def _fold(placed):
+    """A Set followed by a Link, neither comparing and nothing landing
+    between them, as one command."""
+    out = []
+    for p in placed:
+        prev = out[-1] if out else None
+        if isinstance(p, Instruction) and p.kind == "link" and p.condition is None \
+                and isinstance(prev, Instruction) and prev.kind in ("set", "gprm") \
+                and prev.condition is None and not prev.body[1] & 0x0F:
+            body = bytearray(prev.body)
+            body[1] |= p.body[1] & 0x0F
+            body[6:8] = p.body[6:8]
+            out[-1] = Instruction(prev.kind, bytes(body))
+        else:
+            out.append(p)
+    return out
 
 
 def _conditions(c):
@@ -405,6 +443,10 @@ def _flatten(items, out):
             out.append(("label", end))
         elif isinstance(item, Instruction):
             out.append(item)
+        elif isinstance(item, Label):
+            out.append(("label", item.name))
+        elif isinstance(item, Goto):
+            out.append(("goto", item.name, item.condition))
         else:
             raise VtsError(f"{item!r} is not an instruction")
     return out
@@ -412,7 +454,7 @@ def _flatten(items, out):
 
 def assemble(items):
     """The commands (8 bytes each) of a list of instructions and Ifs."""
-    placed = _flatten(items, [])
+    placed = _fold(_flatten(items, []))
     lines = {}
     n = 0
     for p in placed:
@@ -420,6 +462,9 @@ def assemble(items):
             lines[p[1]] = n + 1
         else:
             n += 1
+    for p in placed:
+        if isinstance(p, tuple) and p[0] == "goto" and p[1] not in lines:
+            raise VtsError(f"Goto {p[1]!r}: no such Label")
     needs_landing = any(isinstance(p, tuple) and p[0] == "goto" and lines[p[1]] == n + 1
                         for p in placed)
     if needs_landing:

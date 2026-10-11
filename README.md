@@ -64,8 +64,8 @@ play the discs vtskit writes.
 
 ## What is here now
 
-Steps 1 to 3 of the plan are in: discs with titles, menus and angles, and
-what they are checked with.
+Steps 1 to 3 of the plan are in: discs with titles, menus, subtitles and
+angles, dvdauthor's command language, and what they are checked with.
 
 * `vtskit.titleset` writes a titleset: the title VOBs (one a title, cut
   into files under 1 GiB) with their navigation packs filled, and
@@ -76,19 +76,34 @@ what they are checked with.
   dvdauthor places it. With menus (`vtskit.menu`: a Menu's stream, its
   Buttons with their rectangles, arrow-key neighbours and commands, its
   cells and which remote key it answers) it also writes the menu VOB, with
-  the button overlay as a subpicture (`vtskit.spu`) and the highlight
-  information in every navigation pack, and the menu tables of the IFO. A
-  title may be several parts in a row, streams and `Angles` blocks of 2 to
-  9 streams: an angle block is interleaved on the disc, its navigation
-  packs point from each unit to every angle's next, and its cells are
-  marked as an angle block.
+  the button overlay as a subpicture (`vtskit.spu`; invisible until a
+  button is selected, or drawn in a normal colour all the time) and the
+  highlight information in every navigation pack, and the menu tables of
+  the IFO. A menu without a stream is a program chain of commands alone, as
+  dvdauthor writes a `<pgc>` without a `<vob>` (a title menu that only
+  jumps on, a titleset's root menu that only routes). A title may be
+  several parts in a row, streams and `Angles` blocks of 2 to 9 streams: an
+  angle block is interleaved on the disc, its navigation packs point from
+  each unit to every angle's next, and its cells are marked as an angle
+  block.
+* `vtskit.subtitles` adds subtitles to a title's program stream, as spumux
+  does: each cue a picture of up to four colours placed on the screen and
+  shown for a while, as subpicture packs a little before their time.
+* `vtskit.lang` compiles dvdauthor's command language (`jump title 2;`,
+  `if (g5 != 0) { button = g5; }`, `call menu entry root;`) for the domain
+  a text runs in, to the same commands dvdauthor writes for it: a tool
+  that already speaks the language, as oncemore does, keeps its text. A
+  button of several commands runs them from the menu's post through a
+  dispatcher, and a jump to a chapter of another titleset goes through pad
+  program chains, as dvdauthor's "jumppads" do.
 * `vtskit.vmg` writes the video manager: VIDEO_TS.IFO and its BUP, with
   the first-play commands, the table of titles and the titlesets'
   attributes, and VIDEO_TS.VOB with the title menu when there is one. With
   `vtskit.titleset` it writes a whole VIDEO_TS.
 * `vtskit.vm` encodes the navigation commands (dvdinfo vmi.html): jumps,
   calls and links, the system and general registers, and `If` blocks
-  assembled into Goto lines the way dvdauthor compiles its language.
+  assembled into Goto lines the way dvdauthor compiles its language (a Set
+  followed by a Link folded into one command, as it does).
 * `vtskit.nav` fills the navigation packs of a VOB: the PCI (times) and DSI
   (where the VOBU and its reference pictures end, where the VOBUs 0.5 s to
   120 s away start, where its sound and subtitles start). `vtskit.ps` reads
@@ -103,14 +118,20 @@ the VOBs must be the same byte for byte: NTSC and PAL, 4:3 and 16:9,
 chapters on and between VOBU starts, two titles in a titleset, AC-3, LPCM
 and MPEG sound with languages, B-pictures, short GOPs, a 40-second title,
 a subtitle track, two titlesets; every command form is the bytes dvdauthor
-compiles for the same statement; for menus, the highlight information of
-every navigation pack and the IFOs' menu tables are dvdauthor's (its
-buttons made with spumux). A VIDEO_TS written by vtskit alone plays its
-titles and chapters in order under libdvdnav, its commands jumping between
-titles, and its menus' buttons lead where they say; a title with an angle
-block plays and switches angles under libdvdnav, every pointer of its
-navigation packs landing on the unit it names (dvdauthor writes no angles,
-so a set-top player is the check still owed)
+compiles for the same statement, and a disc described in its language
+(menus of commands alone, buttons of several commands, cell commands, two
+titlesets) comes out with the same IFOs; for menus, the highlight
+information of every navigation pack and the IFOs' menu tables are
+dvdauthor's (its buttons made with spumux), and a menu's overlay in a
+normal colour is spumux's unit byte for byte; subtitles muxed by vtskit are
+spumux's units, placed where spumux places them, and the title written
+from that stream is dvdauthor's. A VIDEO_TS written by vtskit alone plays
+its titles and chapters in order under libdvdnav, its commands jumping
+between titles, its menus' buttons lead where they say, and its jumps into
+another titleset's chapters land; a title with an angle block plays and
+switches angles under libdvdnav, every pointer of its navigation packs
+landing on the unit it names (dvdauthor writes no angles, so a set-top
+player is the check still owed)
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
 it needs is missing). oncemore's switch to vtskit comes next.
 

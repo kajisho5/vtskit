@@ -1,14 +1,17 @@
-"""Subpicture units: the button overlay of a menu, as a DVD subpicture.
+"""Subpicture units: the button overlay of a menu, or a subtitle, as a DVD
+subpicture.
 
 A subpicture unit (https://dvdnav.mplayerhq.hu/dvdinfo/spu.html) is a
-header, the run-length coded pixels of the top and bottom fields, and a
-display control sequence. Pixels have four codes: 0 background, 1 pattern,
+header, the run-length coded pixels of the top and bottom fields, and
+display control sequences: the first shows the picture (its colours from
+the program chain's palette, a contrast each), a second may take it off
+the screen after a delay. Pixels have four codes: 0 background, 1 pattern,
 2 and 3 emphasis. A menu's overlay here is drawn with code 1 where a button
 lights up; the unit shows nothing by itself (every code transparent) and
 the player colours a button's pixels from the PCI's colour table when it is
-selected or activated (vtskit.menu). The unit is carried in one or more
-packs of private stream 1, sub-stream 0x20 + n, placed after the first
-navigation pack of the menu's VOB.
+selected or activated (vtskit.menu). A subtitle (vtskit.subtitles) is a
+picture placed at a point of the screen, shown for a while. The unit is
+carried in one or more packs of private stream 1, sub-stream 0x20 + n.
 """
 
 import struct
@@ -74,8 +77,9 @@ class _Bits:
 
 
 def _encode_line(bits, line):
-    """One line of pixel codes as runs: 4, 8, 12 or 16 bits a run; a run to
-    the end of the line is count 0 in 16 bits."""
+    """One line of pixel codes as runs: 4, 8, 12 or 16 bits a run, the
+    shortest that holds the count; a run to the end of the line that needs
+    16 bits (over 63) is count 0 in 16 bits (as spumux chooses)."""
     x = 0
     n = len(line)
     while x < n:
@@ -83,7 +87,7 @@ def _encode_line(bits, line):
         run = 1
         while x + run < n and line[x + run] == code:
             run += 1
-        if x + run == n and run > 3:
+        if x + run == n and run > 63:
             bits.put(code, 16)                   # count 0, to the end of the line
         elif run <= 3:
             bits.put(run << 2 | code, 4)
@@ -100,20 +104,34 @@ def _encode_line(bits, line):
     bits.align()
 
 
-def encode(overlay, forced=True, colours=(0, 0, 0, 0), contrasts=(0, 0, 0, 0)):
-    """The subpicture unit of an overlay: its pixels inside their bounds,
-    shown from its PTS on (forced: shown even with subtitles off), the four
-    codes drawn with these palette entries and contrasts (0 transparent to 15
-    opaque; all transparent by default, for a button overlay)."""
-    box = overlay.bounds()
-    if box is None:
-        raise VtsError("the overlay is blank")
-    x0, y0, x1, y1 = box
+def encode(overlay, forced=True, colours=(0, 0, 0, 0), contrasts=(0, 0, 0, 0), at=None,
+           stop=None):
+    """The subpicture unit of an overlay: its pixels inside their bounds
+    (or the whole picture with its top left corner `at` (x, y)), shown
+    from its PTS on (forced: shown even with subtitles off), the four
+    codes drawn with these palette entries and contrasts (0 transparent to
+    15 opaque; all transparent by default, for a button overlay), taken off
+    the screen `stop` ticks (90 kHz) after the PTS if given."""
+    for name, values in (("colours", colours), ("contrasts", contrasts)):
+        if len(values) != 4 or not all(0 <= v <= 15 for v in values):
+            raise VtsError(f"the four {name} are 0 to 15")
+    if at is None:
+        box = overlay.bounds()
+        if box is None:
+            raise VtsError("the overlay is blank")
+        lx0, ly0, lx1, ly1 = box                     # in the picture
+        x0, y0, x1, y1 = box                         # on the screen
+    else:
+        lx0, ly0, lx1, ly1 = 0, 0, overlay.width - 1, overlay.height - 1
+        x0, y0 = at
+        x1, y1 = x0 + overlay.width - 1, y0 + overlay.height - 1
+        if not (0 <= x0 and x1 < 1 << 10 and 0 <= y0 and y1 < 1 << 10):
+            raise VtsError(f"a picture at {at} of {overlay.width}x{overlay.height} is off the screen")
     fields = []
-    for first in (y0, y0 + 1):                   # the top field: lines y0, y0 + 2, ...
+    for first in (ly0, ly0 + 1):                 # the top field: lines y0, y0 + 2, ...
         bits = _Bits()
-        for y in range(first, y1 + 1, 2):
-            _encode_line(bits, overlay.pixels[y * overlay.width + x0:y * overlay.width + x1 + 1])
+        for y in range(first, ly1 + 1, 2):
+            _encode_line(bits, overlay.pixels[y * overlay.width + lx0:y * overlay.width + lx1 + 1])
         fields.append(bytes(bits.out))
     top = 4
     bottom = top + len(fields[0])
@@ -127,7 +145,14 @@ def encode(overlay, forced=True, colours=(0, 0, 0, 0), contrasts=(0, 0, 0, 0)):
                        y0 >> 4, (y0 & 0xF) << 4 | y1 >> 8, y1 & 0xFF])
     commands += struct.pack(">BHH", 0x06, top, bottom)
     commands += b"\xff"
-    dcsq = struct.pack(">HH", 0, dcsqt) + commands   # one sequence, pointing at itself
+    if stop is None:
+        dcsq = struct.pack(">HH", 0, dcsqt) + commands   # one sequence, pointing at itself
+    else:
+        delay = int(round(stop / 1024))
+        if not 0 < delay <= 0xFFFF:
+            raise VtsError(f"a picture shown for {stop} ticks: up to {0xFFFF * 1024} and over 0")
+        second = dcsqt + 4 + len(commands)
+        dcsq = struct.pack(">HH", 0, second) + commands + struct.pack(">HH", delay, second) + b"\x02\xff"
     size = dcsqt + len(dcsq)
     if size > MAX_UNIT:
         raise VtsError(f"the subpicture unit is {size} bytes (at most {MAX_UNIT})")
