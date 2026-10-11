@@ -105,7 +105,16 @@ class Title:
     choose from as (Y, Cr, Cb) (black where not given), and its program
     chain's commands: `pre` and `post` as lists of 8-byte commands
     (`vtskit.vm.assemble` makes them), `cell_commands` as {chapter number:
-    one 8-byte command run when the chapter's last cell ends}."""
+    one 8-byte command run when the chapter's last cell ends}.
+
+    `next_pgc`, `prev_pgc` and `up_pgc` name the program chains (title
+    numbers in this titleset; 0: none) that follow, precede and contain
+    this one: the "next", "previous" and "goup PGCN" of the program chain
+    header (dvdinfo pgc.html, which says no more of them). dvdauthor
+    writes none (titles are chained with commands instead). Under
+    libdvdnav, a title whose post commands run out plays on into its next
+    program chain, and one without a next stops (tests/test_titleset.py);
+    what players make of them is otherwise not described."""
     stream: str | None = None
     chapters: tuple = (0.0,)
     audio: tuple = ()
@@ -117,6 +126,9 @@ class Title:
     stills: dict = field(default_factory=dict)      # {chapter: seconds 1-254, or None: until Play}
     uops: int = 0                                   # user operations the title forbids (bit n: vtskit.vm.UOP_*)
     parts: tuple = ()
+    next_pgc: int = 0
+    prev_pgc: int = 0
+    up_pgc: int = 0
 
 
 @dataclass
@@ -302,11 +314,13 @@ def _still(seconds):
     return seconds
 
 
-def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=0, video=None):
+def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=0, video=None,
+         links=(0, 0, 0)):
     """One program chain: `commands` = (pre, post, {chapter: command});
     `stills` {chapter: seconds or None} holds the picture at the chapter's
     last cell's end. `video`: the domain's video attribute bytes, for the
-    subpicture streams of a 16:9 picture."""
+    subpicture streams of a 16:9 picture. `links`: the next, previous and
+    group program chain numbers (0: none)."""
     pre, post, cell_commands = commands
     cells = written.cells
     programs = written.programs or [1]
@@ -353,6 +367,7 @@ def _pgc(commands, written, frame, subs, palette, title=True, stills=None, uops=
             else:
                 entry = (0x80 | k) << 24
             struct.pack_into(">I", head, 0x1C + 4 * n, entry)
+    struct.pack_into(">HHH", head, 0x9C, *links)
     head[0xA4:0xE4] = _palette(palette)
     table = struct.pack(">HHHH", len(pre), len(post), len(cell_list),
                         8 + 8 * (len(pre) + len(post) + len(cell_list)) - 1)
@@ -830,8 +845,13 @@ def _write(folder, vts, titles, written, menus, language, pan_scan, letterbox, c
     ptt = _table(lambda n, end: struct.pack(">HHI", n, 0, end), 8,
                  [b"".join(struct.pack(">HH", w.number, k) for k in range(1, len(w.programs) + 1))
                   for w in written])
+    for n, t in enumerate(titles, 1):
+        for name in ("next_pgc", "prev_pgc", "up_pgc"):
+            if not 0 <= getattr(t, name) <= len(titles):
+                raise VtsError(f"title {n}: {name} {getattr(t, name)}: the titleset has {len(titles)} program chains")
     pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, sorted(w.stream.subpictures), t.palette,
-                 stills=t.stills, uops=t.uops, video=video) for t, w in zip(titles, written)]
+                 stills=t.stills, uops=t.uops, video=video, links=(t.next_pgc, t.prev_pgc, t.up_pgc))
+            for t, w in zip(titles, written)]
     pgci = struct.pack(">HHI", len(pgcs), 0, 0)
     o = 8 + 8 * len(pgcs)
     for w, p in zip(written, pgcs):
