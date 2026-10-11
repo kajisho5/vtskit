@@ -30,6 +30,17 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 
 資料に書かれていないことは、dvdauthor が書き出したバイト列を観察して決めます。dvdauthor・libdvdread・libdvdnav のソースは読みません。libdvdnav は、書き出したディスクを再生して確かめるテストにだけ、公開 API（`dvdnav.h` の関数宣言）を通して使います。
 
+## いまあるもの
+
+まだ何も書き出しません。最初にあるのは、書き出す処理を確かめるための道具です。
+
+* `vtskit.ifo`：IFO ファイルから、各タイトルの各チャプターがディスクのどのセクターから始まるかを読みます。
+* `tests/dvdnav_sim.py`：libdvdnav を ctypes で呼んでディスクを再生します（タイトル、チャプター、メニューとボタン、音声・字幕トラック、アングル）。
+
+テストは ffmpeg と dvdauthor でディスクを作り、両方をそのディスクで確かめます（`python -m unittest discover -s tests -t .`。必要な道具が無いテストはスキップします）。
+
+どちらも [oncemore](https://github.com/kajisho5/oncemore) のもの（`layerbreak.py` と `tests/dvdnav_sim.py`。oncemore では GPL-3.0）で、作者がここでは LGPL-3.0-or-later で再ライセンスしています。
+
 ## 支援する
 
 vtskit は無料で、これからも無料です。役に立ったら [GitHub Sponsors](https://github.com/sponsors/kajisho5)（このリポジトリ上部の **Sponsor** ボタン）から開発を支援できます。不具合の報告も同じくらい助かります：[Issues](https://github.com/kajisho5/vtskit/issues)。
