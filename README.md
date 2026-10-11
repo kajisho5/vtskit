@@ -1,3 +1,5 @@
+<p><img src="docs/images/logo/lockup-dark.svg" alt="vtskit" height="56"></p>
+
 # vtskit
 
 **Planned:** DVD-Video authoring in pure Python. vtskit will write VIDEO_TS
@@ -31,6 +33,15 @@ step, each step checked against the same playback tests. The full plan is in
 **Clean implementation:** vtskit is written from public descriptions of the
 DVD-Video format, not from the source of dvdauthor, libdvdread or libdvdnav.
 libdvdnav is only used in the tests, to play the discs vtskit writes.
+
+## Support
+
+vtskit is free and stays free. If it saves you time, you can support its
+development through [GitHub Sponsors](https://github.com/sponsors/kajisho5)
+(the **Sponsor** button at the top of this repository). Bug reports help just
+as much: [Issues](https://github.com/kajisho5/vtskit/issues).
+
+The logo, colours and writing rules: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## License
 
