@@ -17,7 +17,8 @@ import zlib
 
 from vtskit import VtsError, nav, ps
 
-TOOLS_OK = bool(shutil.which("ffmpeg") and shutil.which("dvdauthor"))
+FFMPEG_OK = bool(shutil.which("ffmpeg"))
+TOOLS_OK = FFMPEG_OK and bool(shutil.which("dvdauthor"))
 SPUMUX_OK = bool(shutil.which("spumux"))
 
 
@@ -166,6 +167,44 @@ class TestPieces(unittest.TestCase):
             ps.read_packs(b"\x00" * 100)
         with self.assertRaises(VtsError):
             ps.read_packs(b"\x00" * 2048)
+
+    @unittest.skipUnless(FFMPEG_OK, "needs ffmpeg")
+    def test_pictures_without_pts(self):
+        # the muxer may give a PTS to the first picture of a packet only
+        # (ffmpeg 8 does): the others are timed from their place in the
+        # group's display order, and the navigation packs come out the same
+        tmp = tempfile.mkdtemp(prefix="vtskit-nopts-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        mpg = os.path.join(tmp, "in.mpg")
+        encode(mpg, seconds=4, extra=("-bf", "2"))
+        with open(mpg, "rb") as f:
+            whole = bytearray(ps.drop_padding(f.read()))
+        stripped = bytearray(whole)
+        for i in range(len(whole) // ps.SECTOR):          # every video packet but a group's first
+            base = i * ps.SECTOR
+            o = 14 + (whole[base + 13] & 7)
+            while o + 6 <= ps.SECTOR and whole[base + o:base + o + 3] == b"\x00\x00\x01":
+                sid = whole[base + o + 3]
+                end = o + 6 + int.from_bytes(whole[base + o + 4:base + o + 6], "big")
+                if sid == 0xE0 and whole[base + o + 7] & 0x80 and \
+                        b"\x00\x00\x01\xb8" not in whole[base + o + 9 + whole[base + o + 8]:base + end]:
+                    n = 10 if whole[base + o + 7] & 0x40 else 5
+                    stripped[base + o + 7] &= 0x3F                      # no PTS, no DTS
+                    stripped[base + o + 9:base + o + 9 + n] = b"\xff" * n  # stuffing instead
+                o = end
+        stamped = [sum(e.sid == 0xE0 and e.pts is not None for pk in ps.iter_packs(d) for e in pk.pes)
+                   for d in (whole, stripped)]
+        self.assertLess(0, stamped[1])
+        self.assertLess(stamped[1], stamped[0] // 2)
+        a, b = ps.scan(whole), ps.scan(stripped)
+        self.assertEqual([p.pts for p in b.pictures], [p.pts for p in a.pictures])
+        self.assertEqual(b.video_end, a.video_end)
+        cells = [(1, 1, 0, len(a.navs) - 1)]
+        nav.fill(whole, cells)
+        nav.fill(stripped, cells)
+        for sector, _ in a.navs:
+            self.assertEqual(stripped[sector * ps.SECTOR:(sector + 1) * ps.SECTOR],
+                             whole[sector * ps.SECTOR:(sector + 1) * ps.SECTOR], f"navigation pack {sector}")
 
     def test_padding_dropped(self):
         pack = bytearray(2048)

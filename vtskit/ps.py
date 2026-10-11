@@ -111,12 +111,13 @@ def drop_padding(data):
 
 
 class Picture:
-    __slots__ = ("type", "start", "end", "pts", "fields")
+    __slots__ = ("type", "start", "end", "pts", "fields", "order")
 
-    def __init__(self, type_, start, pts):
+    def __init__(self, type_, start, pts, order):
         self.type, self.start, self.pts = type_, start, pts
         self.end = None          # sector of the picture's last byte
         self.fields = 2
+        self.order = order       # temporal_reference: its place in its group's display order
 
 
 class _Video:
@@ -125,6 +126,7 @@ class _Video:
 
     def __init__(self):
         self.pictures = []
+        self.groups = []             # the pictures of each group of pictures
         self.frame = None
         self.sequence = None         # (width, height, aspect_ratio_information, frame_rate_code)
         self.tail = b""              # unread bytes of the packets before
@@ -162,6 +164,8 @@ class _Video:
                 self.sequence = (buf[k + 4] << 4 | buf[k + 5] >> 4,
                                  (buf[k + 5] & 0x0F) << 8 | buf[k + 6],
                                  buf[k + 7] >> 4, buf[k + 7] & 0x0F)
+            elif code == _GOP:
+                self.groups.append([])
             elif code == _PICTURE:
                 t = "?IPB"[(buf[k + 5] >> 3) & 7]
                 # a packet's PTS belongs to the first picture that starts in it
@@ -171,7 +175,11 @@ class _Video:
                     own, used = pts, True
                 else:
                     own = None
-                self.pictures.append(Picture(t, sector_of(k), own))
+                picture = Picture(t, sector_of(k), own, buf[k + 4] << 2 | buf[k + 5] >> 6)
+                if not self.groups or t == "I" and self.groups[-1]:
+                    self.groups.append([])           # (a group without its header)
+                self.groups[-1].append(picture)
+                self.pictures.append(picture)
             elif code == _EXT and self.pictures and (buf[k + 4] >> 4) == 8:
                 self.pictures[-1].fields = 3 if buf[k + 7] & 0x02 else 2
             k += 3
@@ -187,6 +195,26 @@ class _Video:
             self.pictures[-1].end = self.last_sector
         if self.pictures and self.frame is None:
             raise VtsError("the video has no sequence header")
+        self._time_pictures()
+
+    def _time_pictures(self):
+        """A picture whose packet carries no PTS (ffmpeg's muxer may give one
+        to the first picture of a packet only) is shown at its place in its
+        group's display order: temporal_reference counts the pictures of
+        the group from the first shown, each lasting its fields."""
+        for group in self.groups:
+            shown = sorted(group, key=lambda p: p.order)
+            known = next((p for p in shown if p.pts is not None), None)
+            if known is None or all(p.pts is not None for p in shown):
+                continue
+            at, times = 0, {}
+            for p in shown:
+                times[id(p)] = at
+                at += p.fields * self.frame / 2
+            base = known.pts - times[id(known)]
+            for p in shown:
+                if p.pts is None:
+                    p.pts = int(round(base + times[id(p)]))
 
 
 class _Subpictures:
