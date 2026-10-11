@@ -464,11 +464,19 @@ def _aligned(loaded, where):
     """Angles must have the same VOBUs in time (the same GOPs) and length."""
     first = loaded[0]
     for k, other in enumerate(loaded[1:], 2):
-        same = len(other[1]) == len(first[1]) and all(
-            a.s_ptm - first[1][0].s_ptm == b.s_ptm - other[1][0].s_ptm for a, b in zip(first[1], other[1])) \
-            and first[0].video_end - first[1][0].s_ptm == other[0].video_end - other[1][0].s_ptm
-        if not same:
-            raise VtsError(f"{where}: angle {k} differs from angle 1 in length or GOP layout")
+        (fs, fv, _), (os_, ov, _) = first, other
+        starts = [(a.s_ptm - fv[0].s_ptm, b.s_ptm - ov[0].s_ptm) for a, b in zip(fv, ov)]
+        if len(fv) != len(ov):
+            why = f"{len(fv)} VOBUs in angle 1, {len(ov)} in angle {k}"
+        elif any(a != b for a, b in starts):
+            i, (a, b) = next((i, ab) for i, ab in enumerate(starts, 1) if ab[0] != ab[1])
+            why = f"VOBU {i} starts {a} ticks into angle 1, {b} into angle {k}"
+        elif fs.video_end - fv[0].s_ptm != os_.video_end - ov[0].s_ptm:
+            why = f"angle 1 is {fs.video_end - fv[0].s_ptm} ticks long, angle {k} {os_.video_end - ov[0].s_ptm}"
+        else:
+            continue
+        raise VtsError(f"{where}: angle {k} differs from angle 1 in length or GOP layout ({why}; "
+                       f"{len(fs.pictures)} and {len(os_.pictures)} pictures)")
 
 
 def _title(number, title, offset, vob_id):
