@@ -17,7 +17,8 @@ import zlib
 
 from vtskit import VtsError, nav, ps
 
-TOOLS_OK = bool(shutil.which("ffmpeg") and shutil.which("dvdauthor"))
+FFMPEG_OK = bool(shutil.which("ffmpeg"))
+TOOLS_OK = FFMPEG_OK and bool(shutil.which("dvdauthor"))
 SPUMUX_OK = bool(shutil.which("spumux"))
 
 
@@ -167,6 +168,7 @@ class TestPieces(unittest.TestCase):
         with self.assertRaises(VtsError):
             ps.read_packs(b"\x00" * 2048)
 
+    @unittest.skipUnless(FFMPEG_OK, "needs ffmpeg")
     def test_pictures_without_pts(self):
         # the muxer may give a PTS to the first picture of a packet only
         # (ffmpeg 8 does): the others are timed from their place in the
