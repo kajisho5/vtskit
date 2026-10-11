@@ -4,9 +4,9 @@
 
 **In the works:** DVD-Video authoring in pure Python, to replace dvdauthor.
 vtskit will write VIDEO_TS itself: the IFO files, the VOBs' navigation
-packs, menus and the DVD's navigation commands. The writer itself is not
-here yet; the plan is, and the tools it will be checked with (see
-[What is here now](#what-is-here-now)).
+packs, menus and the DVD's navigation commands. Its first part, the
+navigation packs, is here and matches dvdauthor byte for byte; the IFO
+files come next (see [What is here now](#what-is-here-now)).
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
@@ -42,8 +42,10 @@ around it is right.
 
 **Input:** the MPEG-2 program stream oncemore's encoder makes (ffmpeg
 `-f dvd`, 2048-byte packs, a navigation pack at every GOP with its PCI and
-DSI left empty). vtskit fills in the navigation packs and keeps every pack
-where it is.
+DSI left empty), with subtitles added by spumux if there are any. vtskit
+fills in the navigation packs; every other pack keeps its place, except
+packs of padding alone (spumux leaves some), which are dropped as dvdauthor
+drops them.
 
 **Clean implementation:** the DVD-Video specification itself is not public
 (it was licensed under NDA by DVD FLLC). vtskit is written from public
@@ -62,21 +64,27 @@ play the discs vtskit writes.
 
 ## What is here now
 
-Nothing is written yet. The first pieces are what the writer will be
-checked with:
+The first part of step 1, and what the writer is checked with:
 
+* `vtskit.nav` fills the navigation packs of a VOB: the PCI (times) and DSI
+  (where the VOBU and its reference pictures end, where the VOBUs 0.5 s to
+  120 s away start, where its sound and subtitles start). `vtskit.ps` reads
+  the program stream for it.
 * `vtskit.ifo` reads where each chapter of each title starts, as a sector of
   the disc, from the IFO files.
 * `tests/dvdnav_sim.py` plays a disc with libdvdnav through ctypes: titles,
   chapters, menus and buttons, sound and subtitle tracks, and angles.
 
-The tests build a disc with ffmpeg and dvdauthor and check both against it
-(`python -m unittest discover -s tests -t .`; a test is skipped when a tool
-it needs is missing).
+The tests give the same streams to dvdauthor and to vtskit, and the VOBs
+must be the same byte for byte: NTSC and PAL, AC-3, LPCM and MPEG sound,
+B-pictures, short GOPs, a 40-second title, two sound tracks and a subtitle
+track (`python -m unittest discover -s tests -t .`; a test is skipped when
+a tool it needs is missing). The IFO files come next.
 
-Both come from [oncemore](https://github.com/kajisho5/oncemore) (its
-`layerbreak.py` and `tests/dvdnav_sim.py`, GPL-3.0 there) and are
-relicensed here under LGPL-3.0-or-later by their author.
+`vtskit.ifo` and `tests/dvdnav_sim.py` come from
+[oncemore](https://github.com/kajisho5/oncemore) (its `layerbreak.py` and
+`tests/dvdnav_sim.py`, GPL-3.0 there) and are relicensed here under
+LGPL-3.0-or-later by their author.
 
 ## Support
 

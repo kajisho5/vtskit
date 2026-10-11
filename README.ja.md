@@ -2,7 +2,7 @@
 
 # vtskit
 
-**開発中：** Python だけで DVD-Video をオーサリングし、dvdauthor を置き換えるライブラリです。IFO ファイル、VOB のナビゲーションパック、メニュー、DVD のナビゲーション命令まで、VIDEO_TS を自前で書き出す予定です。書き出す処理そのものはまだありません。いまあるのは計画と、書き出しを確かめるための道具です（[いまあるもの](#いまあるもの)）。
+**開発中：** Python だけで DVD-Video をオーサリングし、dvdauthor を置き換えるライブラリです。IFO ファイル、VOB のナビゲーションパック、メニュー、DVD のナビゲーション命令まで、VIDEO_TS を自前で書き出す予定です。最初の部分（ナビゲーションパック）はできていて、dvdauthor の出力とバイト単位で一致します。次は IFO ファイルです（[いまあるもの](#いまあるもの)）。
 
 ## なぜ作るか
 
@@ -21,7 +21,7 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 
 通常のタイトルを先にするのは、dvdauthor の出力と項目ごとに比べられるからです。周りのタイトルセットが正しくないうちは、アングルブロックを確かめられません。
 
-**入力：** oncemore のエンコーダが作る MPEG-2 プログラムストリーム（ffmpeg の `-f dvd`。2048 バイトのパックで、GOP ごとにナビゲーションパックがあり、その PCI と DSI は空）。vtskit はナビゲーションパックの中身を埋め、パックの位置は変えません。
+**入力：** oncemore のエンコーダが作る MPEG-2 プログラムストリーム（ffmpeg の `-f dvd`。2048 バイトのパックで、GOP ごとにナビゲーションパックがあり、その PCI と DSI は空）。字幕がある場合は spumux で加えたもの。vtskit はナビゲーションパックの中身を埋め、ほかのパックの位置は変えません。ただし詰め物だけのパック（spumux が残すことがある）は、dvdauthor と同じく取り除きます。
 
 **独自に実装します：** DVD-Video の規格書そのものは公開されていません（DVD FLLC が秘密保持契約のもとでライセンスしていました）。vtskit は形式についての公開資料をもとに書きます。
 
@@ -32,14 +32,15 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 
 ## いまあるもの
 
-まだ何も書き出しません。最初にあるのは、書き出す処理を確かめるための道具です。
+計画のステップ1の前半と、書き出しを確かめるための道具です。
 
+* `vtskit.nav`：VOB のナビゲーションパックを埋めます。PCI（時刻）と DSI（VOBU と参照ピクチャの終わり、0.5 秒〜120 秒先と前の VOBU の位置、音声と字幕の始まり）。`vtskit.ps` がそのためにプログラムストリームを読みます。
 * `vtskit.ifo`：IFO ファイルから、各タイトルの各チャプターがディスクのどのセクターから始まるかを読みます。
 * `tests/dvdnav_sim.py`：libdvdnav を ctypes で呼んでディスクを再生します（タイトル、チャプター、メニューとボタン、音声・字幕トラック、アングル）。
 
-テストは ffmpeg と dvdauthor でディスクを作り、両方をそのディスクで確かめます（`python -m unittest discover -s tests -t .`。必要な道具が無いテストはスキップします）。
+テストは同じストリームを dvdauthor と vtskit に渡し、できた VOB がバイト単位で一致することを確かめます。NTSC と PAL、AC-3・LPCM・MPEG 音声、B ピクチャ、短い GOP、40 秒のタイトル、音声2本と字幕1本です（`python -m unittest discover -s tests -t .`。必要な道具が無いテストはスキップします）。次は IFO ファイルです。
 
-どちらも [oncemore](https://github.com/kajisho5/oncemore) のもの（`layerbreak.py` と `tests/dvdnav_sim.py`。oncemore では GPL-3.0）で、作者がここでは LGPL-3.0-or-later で再ライセンスしています。
+`vtskit.ifo` と `tests/dvdnav_sim.py` は [oncemore](https://github.com/kajisho5/oncemore) のもの（`layerbreak.py` と `tests/dvdnav_sim.py`。oncemore では GPL-3.0）で、作者がここでは LGPL-3.0-or-later で再ライセンスしています。
 
 ## 支援する
 

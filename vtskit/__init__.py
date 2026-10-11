@@ -1,7 +1,9 @@
 """vtskit: DVD-Video titlesets in pure Python.
 
-Nothing is written yet (see the plan in the README). What is here:
+The first part of the titleset writer (see the plan in the README):
 
+* `vtskit.nav`: the navigation packs of a VOB filled in (`vtskit.ps` reads
+  the program stream for it).
 * `vtskit.ifo`: the chapters of a disc and where they start, read from its
   IFO files.
 """
