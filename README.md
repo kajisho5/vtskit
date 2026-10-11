@@ -91,7 +91,10 @@ oncemore writing its discs with vtskit.
   remote keys they are marked for (root, audio, subpicture, angle, PTT);
   as dvdauthor arranges it, a domain whose menus name no root menu makes
   its first menu the root, and a titleset without a chapter menu gets one
-  that links to the first menu. A title may be
+  that links to the first menu. A title may name the program chains that
+  follow, precede and contain it (`next_pgc`, `prev_pgc`, `up_pgc`): under
+  libdvdnav a title whose post commands run out plays on into its next
+  program chain; dvdauthor writes none of these. A title may be
   several parts in a row, streams and `Angles` blocks of 2 to 9 streams: an
   angle block is interleaved on the disc, its navigation packs point from
   each unit to every angle's next, and its cells are marked as an angle

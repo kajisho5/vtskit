@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import unittest
 
-from vtskit import VtsError, ifo, ps, titleset, vm
+from vtskit import VtsError, ifo, ps, titleset, vm, vmg
 from vtskit.titleset import Audio, Subpicture, Title
 
 try:
@@ -294,6 +294,33 @@ class TestAgainstDvdauthor(unittest.TestCase):
                 if d.stopped:
                     break
             self.assertEqual([(s[2], s[3]) for s in d.stills], [(1, 255), (2, 2)])
+
+    @unittest.skipUnless(LIBDVDNAV, "libdvdnav not installed")
+    def test_next_program_chain_under_libdvdnav(self):
+        # a title whose post commands run out plays on into its next
+        # program chain; one without a next stops
+        a, b = os.path.join(self.tmp, "a.mpg"), os.path.join(self.tmp, "b.mpg")
+        encode(a, seconds=3)
+        encode(b, seconds=3)
+        out = os.path.join(self.tmp, "chain")
+        ts = titleset.write(out, 1, [Title(a, post=(), next_pgc=2), Title(b, post=(), prev_pgc=1, up_pgc=1)])
+        vmg.write(out, [ts])
+        ifo = read(os.path.join(out, "VTS_01_0.IFO"))
+        pgci = struct.unpack_from(">I", ifo, 0xCC)[0] * 2048
+        first = pgci + struct.unpack_from(">I", ifo, pgci + 12)[0]
+        second = pgci + struct.unpack_from(">I", ifo, pgci + 20)[0]
+        self.assertEqual(ifo[first + 0x9C:first + 0xA2].hex(), "000200000000")
+        self.assertEqual(ifo[second + 0x9C:second + 0xA2].hex(), "000000010001")
+        with dvdnav_sim.DvdSim(out, LIBDVDNAV) as d:
+            self.assertEqual(d.wait_title(), (1, 1))
+            self.assertEqual(d.play_to_end_of_title(), ("title", (2, 1)))
+            for _ in range(400_000):
+                d.step()
+                if d.stopped:
+                    break
+            self.assertTrue(d.stopped)
+        with self.assertRaisesRegex(VtsError, "next_pgc"):
+            titleset.write(os.path.join(self.tmp, "x"), 1, [Title(a, next_pgc=3)])
 
     def test_refused(self):
         mpg = os.path.join(self.tmp, "a.mpg")
