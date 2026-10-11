@@ -5,6 +5,7 @@ with libdvdnav."""
 
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -124,6 +125,16 @@ class TestAgainstDvdauthor(unittest.TestCase):
             self.assertEqual([d.num_parts(n) for n in (1, 2, 3)], [2, 1, 1])
         self.assertEqual([ch[:3] for ch in ifo.chapters(ifo.read_folder(disc))],
                          [(1, 1, 1), (1, 1, 2), (1, 2, 1), (2, 1, 1)])
+
+    def test_title_type_carries_the_search_uops(self):
+        a = os.path.join(self.tmp, "a.mpg")
+        encode(a, seconds=2)
+        disc = os.path.join(self.tmp, "disc")
+        ts = titleset.write(disc, 1, [Title(a, uops=vm.UOP_TIME_SEARCH | vm.UOP_STOP), Title(a)])
+        vmg.write(disc, [ts])
+        d = read(os.path.join(disc, "VIDEO_TS.IFO"))
+        o = struct.unpack_from(">I", d, 0xC4)[0] * 2048
+        self.assertEqual((d[o + 8], d[o + 20]), (0x3D, 0x3C))
 
     def test_refused(self):
         a = os.path.join(self.tmp, "a.mpg")

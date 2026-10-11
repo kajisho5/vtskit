@@ -61,6 +61,7 @@ class Menu:
     entry: str | None = None
     first_button: int = 0          # the button selected when the menu shows (0: the player's choice)
     button_offset: int = 0         # added to a number key's digit to pick a button
+    uops: int = 0                  # user operations the menu forbids (bit n: vtskit.vm.UOP_*)
 
 
 ENTRY_TYPES = {"title": 2, "root": 3, "subpicture": 4, "audio": 5, "angle": 6, "ptt": 7}
