@@ -2,7 +2,7 @@
 
 # vtskit
 
-Python だけで DVD-Video をオーサリングし、dvdauthor の代わりになるライブラリです。IFO ファイル、VOB のナビゲーションパック、メニュー、字幕、アングルブロック、DVD のナビゲーション命令（dvdauthor の命令言語からの変換も）まで、VIDEO_TS を自前で書き出します。dvdauthor が同じものを書く範囲では、バイト列は dvdauthor と一致します（[いまあるもの](#いまあるもの)）。[oncemore](https://github.com/kajisho5/oncemore) はこれでディスクを書きます（[oncemore#90](https://github.com/kajisho5/oncemore/pull/90)、アングルは [#91](https://github.com/kajisho5/oncemore/pull/91)）。
+Python だけで DVD-Video をオーサリングし、dvdauthor の代わりになるライブラリです。IFO ファイル、VOB のナビゲーションパック、メニュー、字幕、アングルブロック、DVD のナビゲーション命令（dvdauthor の命令言語からの変換も）まで、VIDEO_TS を自前で書き出します。dvdauthor が同じものを書く範囲では、バイト列は dvdauthor と一致します（[いまあるもの](#いまあるもの)）。[oncemore](https://github.com/kajisho5/oncemore) は [oncemore#90](https://github.com/kajisho5/oncemore/pull/90) からこれでディスクを書いています（アングルは [#91](https://github.com/kajisho5/oncemore/pull/91) から）。
 
 ## なぜ作るか
 
@@ -32,7 +32,7 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 
 ## いまあるもの
 
-計画のステップ1から3が入り、タイトル、メニュー、字幕、アングルのあるディスクを書け、dvdauthor の命令言語も変換できます。
+計画の 4 ステップがすべて入り、タイトル、メニュー、字幕、アングルのあるディスクを書け、dvdauthor の命令言語も変換でき、oncemore はこれでディスクを書いています。
 
 * `vtskit.titleset`：タイトルセットを書きます。タイトルの VOB（タイトルごとに1本、1 GiB 未満のファイルに分割）にナビゲーションパックを埋め、VTS_nn_0.IFO と BUP を書きます。IFO には、ストリームの属性、各タイトルのチャプター、タイトルごとのプログラムチェーン（チャプターごとのプログラムとセル、バイト列で与える pre・post・セル命令）、タイムマップ、セルと VOBU のアドレス表が入ります。チャプターは dvdauthor と同じく、指定時刻に最も近い VOBU の先頭から始まります。メニュー（`vtskit.menu`：Menu のストリーム、矩形・矢印キーの行き先・命令を持つ Button、セル、応答するリモコンキー）があれば、メニュー VOB も書きます。ボタンの光る部分はサブピクチャ（`vtskit.spu`。選ばれるまで見えないか、通常色で常に表示）、ボタン情報は全ナビゲーションパックのハイライト情報に入り、IFO にメニューの表が加わります。ストリームの無い Menu は命令だけのプログラムチェーンになります（dvdauthor の `<vob>` の無い `<pgc>`。飛ぶだけのタイトルメニュー、経路だけのルートメニュー）。タイトルは複数のパート（ストリームと、2〜9 本のストリームからなる `Angles` ブロック）の列にもできます。アングルブロックはディスク上でインターリーブされ、ナビゲーションパックは各ユニットから全アングルの次ユニットを指し、セルはアングルブロックとして印が付きます。
 * `vtskit.subtitles`：spumux のように、タイトルのプログラムストリームに字幕を加えます。各キューは 4 色までの絵を画面上の位置に置き、一定時間表示するもので、表示時刻の少し前にサブピクチャのパックとして入ります。
@@ -43,7 +43,7 @@ vtskit は、他のツールが土台にできる、完成したテスト済み�
 * `vtskit.ifo`：IFO ファイルから、各タイトルの各チャプターがディスクのどのセクターから始まるかを読みます。
 * `tests/dvdnav_sim.py`：libdvdnav を ctypes で呼んでディスクを再生します（タイトル、チャプター、メニューとボタン、音声・字幕トラック、アングル）。
 
-テストは同じタイトルを dvdauthor と vtskit に渡し、IFO と VOB が全バイト一致することを確かめます。NTSC と PAL、4:3 と 16:9、VOBU 先頭に乗るチャプターと乗らないチャプター、1 タイトルセットに 2 タイトル、言語付きの AC-3・LPCM・MPEG 音声、B フレーム、短い GOP、40 秒のタイトル、字幕トラック、2 つのタイトルセット。命令はどの形も、同じ文を dvdauthor が変換したバイト列と一致し、この言語で書いたディスク（命令だけのメニュー、複数命令のボタン、セル命令、2 つのタイトルセット）は IFO が dvdauthor と全バイト一致します。メニューは、全ナビゲーションパックのハイライト情報と IFO のメニュー表が dvdauthor（ボタンは spumux 製）と一致し、通常色のあるメニューのサブピクチャは spumux のユニットとバイト単位で一致します。vtskit が多重化した字幕は spumux のユニットと同じバイト列が同じ位置に入り、そのストリームから書いたタイトル（4:3 と、パンスキャン・レターボックスの有無それぞれの 16:9）は dvdauthor と一致します。vtskit だけで書いた VIDEO_TS は、libdvdnav でタイトルとチャプターが順に再生され、命令でタイトル間を移動し、メニューのボタンは指定どおりの先へ進み、別タイトルセットのチャプターへのジャンプも着地します。アングルブロックのあるタイトルは libdvdnav で再生・切替でき、ナビゲーションパックの全ポインタが指すユニットに実際に着地します（dvdauthor はアングルを書けないので、据え置きプレーヤーでの確認が残っています）（`python -m unittest discover -s tests -t .`。必要な道具が無いテストはスキップします）。oncemore の vtskit への切り替え（ステップ 4）は [oncemore#90](https://github.com/kajisho5/oncemore/pull/90) と [#91](https://github.com/kajisho5/oncemore/pull/91) で、`vtskit/` の写しを `oncemore/_vendor/vtskit` として持ちます。
+テストは同じタイトルを dvdauthor と vtskit に渡し、IFO と VOB が全バイト一致することを確かめます。NTSC と PAL、4:3 と 16:9、VOBU 先頭に乗るチャプターと乗らないチャプター、1 タイトルセットに 2 タイトル、言語付きの AC-3・LPCM・MPEG 音声、B フレーム、短い GOP、40 秒のタイトル、字幕トラック、2 つのタイトルセット。命令はどの形も、同じ文を dvdauthor が変換したバイト列と一致し、この言語で書いたディスク（命令だけのメニュー、複数命令のボタン、セル命令、2 つのタイトルセット）は IFO が dvdauthor と全バイト一致します。メニューは、全ナビゲーションパックのハイライト情報と IFO のメニュー表が dvdauthor（ボタンは spumux 製）と一致し、通常色のあるメニューのサブピクチャは spumux のユニットとバイト単位で一致します。vtskit が多重化した字幕は spumux のユニットと同じバイト列が同じ位置に入り、そのストリームから書いたタイトル（4:3 と、パンスキャン・レターボックスの有無それぞれの 16:9）は dvdauthor と一致します。vtskit だけで書いた VIDEO_TS は、libdvdnav でタイトルとチャプターが順に再生され、命令でタイトル間を移動し、メニューのボタンは指定どおりの先へ進み、別タイトルセットのチャプターへのジャンプも着地します。アングルブロックのあるタイトルは libdvdnav で再生・切替でき、ナビゲーションパックの全ポインタが指すユニットに実際に着地します（dvdauthor はアングルを書けないので、据え置きプレーヤーでの確認が残っています）（`python -m unittest discover -s tests -t .`。必要な道具が無いテストはスキップします）。oncemore の vtskit への切り替え（ステップ 4）は [oncemore#90](https://github.com/kajisho5/oncemore/pull/90) と [#91](https://github.com/kajisho5/oncemore/pull/91) でマージ済みで、`vtskit/` の写しを `oncemore/_vendor/vtskit` として持ちます。
 
 `vtskit.ifo` と `tests/dvdnav_sim.py` は [oncemore](https://github.com/kajisho5/oncemore) のもの（`layerbreak.py` と `tests/dvdnav_sim.py`。oncemore では GPL-3.0）で、作者がここでは LGPL-3.0-or-later で再ライセンスしています。
 
