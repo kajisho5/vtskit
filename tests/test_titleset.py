@@ -131,6 +131,20 @@ class TestAgainstDvdauthor(unittest.TestCase):
         self.assertEqual([t.vob_id for t in ts.titles], [1, 2])
         self.assertEqual(ts.titles[1].first_sector, ts.titles[0].sectors)
 
+    def test_one_picture(self):
+        # a still: one picture, then its sound
+        mpg = os.path.join(self.tmp, "still.mpg")
+        ffmpeg("-f", "lavfi", "-i", "testsrc2=s=720x480:r=30000/1001:d=8", "-f", "lavfi", "-i", "sine=d=8",
+               "-frames:v", "1", "-target", "ntsc-dvd", "-aspect", "4:3", "-c:a", "ac3", "-ac", "2", mpg)
+        self.same("ntsc", 'aspect="4:3"', '<audio lang="en"/>', [Title(mpg, audio=(Audio("en", 2),))])
+
+    def test_sound_outlasts_the_picture(self):
+        # the program chain and the last cell last until the sound ends
+        mpg = os.path.join(self.tmp, "tail.mpg")
+        ffmpeg("-f", "lavfi", "-i", "testsrc2=s=720x480:r=30000/1001:d=3", "-f", "lavfi", "-i", "sine=d=8",
+               "-target", "ntsc-dvd", "-aspect", "4:3", "-c:a", "ac3", "-ac", "2", mpg)
+        self.same("ntsc", 'aspect="4:3"', '<audio lang="en"/>', [Title(mpg, (0, 2), audio=(Audio("en", 2),))])
+
     def test_two_sound_tracks(self):
         mpg = os.path.join(self.tmp, "a.mpg")
         encode(mpg, seconds=6, aspect="16:9", tones=2,

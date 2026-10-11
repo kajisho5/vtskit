@@ -437,7 +437,7 @@ def _prepare(number, vob_id, path, cell_times, offset, extra=None, hli=None):
     bounds = starts + [len(vs)]
     cells = []
     for c, (a, b) in enumerate(zip(bounds, bounds[1:]), 1):
-        end = vs[b].s_ptm if b < len(vs) else stream.video_end
+        end = vs[b].s_ptm if b < len(vs) else stream.end       # (the sound may outlast the picture)
         cells.append(Cell(c, vob_id, c, a, b - 1, offset + vs[a].start, 0, offset + vs[b - 1].start,
                           offset + vs[b - 1].end, vs[a].s_ptm, end, stc_discontinuity=c == 1,
                           seamless=c > 1, last_of_program=c == len(starts)))
@@ -524,7 +524,7 @@ def _title(number, title, offset, vob_id):
     for part in loaded:
         part_start.append(tick)
         st, vs, _ = part[0]
-        tick += st.video_end - vs[0].s_ptm
+        tick += st.end - vs[0].s_ptm
     end = sum(a[0].end - a[1][0].s_ptm for a in (part[0] for part in loaded))
     starts = [(part_start[k] + v.s_ptm - part[0][1][0].s_ptm, k, i)
               for k, part in enumerate(loaded) for i, v in enumerate(part[0][1])]
@@ -567,7 +567,7 @@ def _title(number, title, offset, vob_id):
                     vobu_sectors.append(sector)
                     preceding.append((k, 0, i))
                     sector += vs[i].end - vs[i].start + 1
-                e = vs[i1].s_ptm if i1 < len(vs) else st.video_end
+                e = vs[i1].s_ptm if i1 < len(vs) else st.end
                 lay = layouts[(k, 0)]
                 cells.append(Cell(len(cells) + 1, vob_id, seg, i0, i1 - 1, lay[i0], 0, lay[i1 - 1],
                                   lay[i1 - 1] + vs[i1 - 1].end - vs[i1 - 1].start, vs[i0].s_ptm, e,
@@ -634,7 +634,7 @@ def _title(number, title, offset, vob_id):
                                     nsml.append(d if d >= 0 else 0x80000000 | -d)
                             nsml_info[(k, a)][i] = nsml
                     st = part[a][0]
-                    e = vs[i1].s_ptm if i1 < len(vs) else st.video_end
+                    e = vs[i1].s_ptm if i1 < len(vs) else st.end
                     first_end = unit_start[(a, 0)] + unit_size[(a, 0)] - 1
                     cells.append(Cell(len(cells) + 1, vob_id + a, seg, i0, i1 - 1, lay[i0], first_end,
                                       lay[i1 - 1], lay[i1 - 1] + vs[i1 - 1].end - vs[i1 - 1].start,

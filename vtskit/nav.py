@@ -63,7 +63,8 @@ def vobus(stream):
         if p.type in "IP" and len(v.refs) < 3:
             v.refs.append(p.end - v.start)
     if any(v.s_ptm is None for v in out):
-        raise VtsError("a VOBU without video (VOBUs of sound or stills alone are not written yet)")
+        raise VtsError("a VOBU without video: a stream of sound alone is not a DVD title (dvdauthor "
+                       "refuses it too; a still is one picture, with the sound after it)")
     for a, b in zip(out, out[1:]):
         a.e_ptm = b.s_ptm
     out[-1].e_ptm = stream.end
