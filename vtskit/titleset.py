@@ -182,6 +182,7 @@ class Titleset:
     attributes: bytes = b""     # the VTS_MAT from 0x100 on, as VTS_ATRT copies it
     files: list = field(default_factory=list)
     menu_sectors: int = 0
+    menus: int = 0              # program chains in its menu domain (0: none)
 
     @property
     def sectors(self):
@@ -691,13 +692,25 @@ def _attributes(written, pan_scan, letterbox, audio, subpictures, what, captions
 
 
 def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True, frame=None,
-                video=None):
-    """The VOBs and tables of a menu domain (a titleset's or the VMG's):
-    (written menus, their bytes, VTSM/VMGM_PGCI_UT, C_ADT, VOBU_ADMAP,
-    attributes (video, audio count, audio, subpicture count, subpictures)).
-    `frame` (ticks a frame) and `video` (the 2 video attribute bytes) stand
-    in when no menu has a stream."""
+                video=None, domain="vtsm"):
+    """The VOBs and tables of a menu domain (a titleset's, or the VMG's with
+    `domain` "vmgm"): (written menus, their bytes, VTSM/VMGM_PGCI_UT,
+    C_ADT, VOBU_ADMAP, attributes (video, audio count, audio, subpicture
+    count, subpictures)). `frame` (ticks a frame) and `video` (the 2 video
+    attribute bytes) stand in when no menu has a stream.
+
+    From dvdauthor's output: a domain always has its main menu, the root
+    (the title menu in the VMG). When no menu is marked so, the first menu
+    becomes it, whatever it was marked, and the key it was marked for
+    (audio, subpicture, angle) gets a program chain of its own that links
+    to the first menu; a titleset without a PTT (chapter) menu gets one
+    that links to the first menu too."""
     lang = _lang(language)
+    main = "title" if domain == "vmgm" else "root"
+    entries = [m.entry for m in menus]
+    displaced = None
+    if menus and main not in entries:
+        displaced, entries[0] = entries[0], main
     written, data = [], []
     for n, m in enumerate(menus, 1):
         if not isinstance(m, menus_.Menu):
@@ -725,7 +738,7 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True, frame=
         written.append(w)
         data.append(vob)
         offset += w.sectors
-    kinds = [m.entry for m in menus if m.entry]
+    kinds = [k for k in entries if k]
     if len(kinds) != len(set(kinds)):
         raise VtsError("two menus answer the same key")
     with_vob = [w for w in written if w.stream is not None]
@@ -739,19 +752,25 @@ def menu_domain(menus, language, offset=0, pan_scan=True, letterbox=True, frame=
         video_attr, audio_count, audio_bytes, sp_count, sp_bytes, subs = \
             video, 0, bytes(64), 0, bytes(192), []
     pgcs, cats = [], []
-    for m, w in zip(menus, written):
-        cat = (0x80 | menus_.ENTRY_TYPES[m.entry]) << 24 if m.entry else 0
+    for m, w, entry in zip(menus, written, entries):
+        cat = (0x80 | menus_.ENTRY_TYPES[entry]) << 24 if entry else 0
         pgcs.append(_pgc((m.pre, m.post or (EXIT,), {}), w, frame, subs, menus_.palette(m), title=False,
                          uops=m.uops, video=video_attr))
         cats.append(cat)
     flags = 0
     for k in kinds:
         flags |= menus_.ENTRY_FLAGS[k]
-    if "root" in kinds and "ptt" not in kinds:
-        root = next(n for n, m in enumerate(menus, 1) if m.entry == "root")
-        pgcs.append(_empty_pgc([struct.pack(">BBHHH", 0x20, 4, 0, 0, root)]))   # LinkPGCN root
-        cats.append((0x80 | menus_.ENTRY_TYPES["ptt"]) << 24)
-        flags |= menus_.ENTRY_FLAGS["ptt"]
+    pads = []
+    if displaced not in (None, "ptt"):
+        pads.append(displaced)                     # (served by the root menu, which was it)
+    if domain != "vmgm" and "ptt" not in kinds:
+        pads.append("ptt")
+    for kind in pads:
+        # (LinkPGCN 1: dvdauthor links these to the first menu, whichever
+        # it is, not to the root menu when that comes later)
+        pgcs.append(_empty_pgc([struct.pack(">BBHHH", 0x20, 4, 0, 0, 1)]))
+        cats.append((0x80 | menus_.ENTRY_TYPES[kind]) << 24)
+        flags |= menus_.ENTRY_FLAGS[kind]
     lu = struct.pack(">HHI", len(pgcs), 0, 0)
     o = 8 + 8 * len(pgcs)
     for cat, p in zip(cats, pgcs):
@@ -872,7 +891,8 @@ def _write(folder, vts, titles, written, menus, language, pan_scan, letterbox, c
     files += _write_vobs(folder, vts, written)
     for t, w in zip(titles, written):
         w.uops = t.uops
-    return Titleset(vts, folder, sectors, vob_sectors, written, ifo[0x100:0x400], files, menu_sectors)
+    return Titleset(vts, folder, sectors, vob_sectors, written, ifo[0x100:0x400], files, menu_sectors,
+                    len(menu_written))
 
 
 def _address_tables(written):

@@ -34,9 +34,10 @@ def write(folder, titlesets, menus=(), first_play=None, language="en", provider=
     `titlesets` (the Titleset results of vtskit.titleset.write, numbered
     1, 2, ... in order) and the VMG's `menus` (vtskit.menu.Menu; the one
     with entry "title" answers the Title key). `first_play`: the first-play
-    chain's commands (8 bytes each; default: jump to the title menu, else to
-    title 1). `pal`: the disc's standard, else the first titleset's.
-    Returns the sectors of the whole VIDEO_TS, VMG first."""
+    chain's commands (8 bytes each; by default, as dvdauthor chooses it: a
+    jump to the title menu, else to titleset 1's root menu if that titleset
+    has menus, else to title 1). `pal`: the disc's standard, else the first
+    titleset's. Returns the sectors of the whole VIDEO_TS, VMG first."""
     if not titlesets:
         raise VtsError("a disc has at least one titleset")
     if [t.vts for t in titlesets] != list(range(1, len(titlesets) + 1)):
@@ -47,8 +48,10 @@ def write(folder, titlesets, menus=(), first_play=None, language="en", provider=
         if m.entry not in (None, "title"):
             raise VtsError(f"a VMG menu answers the Title key or none, not {m.entry!r}")
     if first_play is None:
-        if any(m.entry == "title" for m in menus):
+        if menus:
             first_play = vm.assemble([vm.jump_ss_vmgm_menu(vm.MENU_TITLE)])
+        elif titlesets[0].menus:
+            first_play = vm.assemble([vm.jump_ss_vtsm(1, 1, vm.MENU_ROOT)])
         else:
             first_play = vm.assemble([vm.jump_tt(1)])
     for c in first_play:
@@ -72,7 +75,7 @@ def write(folder, titlesets, menus=(), first_play=None, language="en", provider=
         # (a video manager whose menus are commands alone: dvdauthor marks
         # the picture format 0xFFF8)
         menu_written, menu_data, *menu_tables, menu_attributes = menu_domain(
-            menus, language, 0, pan_scan, letterbox, 3600 if pal else 3003, b"\xff\xf8")
+            menus, language, 0, pan_scan, letterbox, 3600 if pal else 3003, b"\xff\xf8", domain="vmgm")
     menu_sectors = sum(w.sectors for w in menu_written)
     if menu_sectors > VOB_FILE_SECTORS:
         raise VtsError("the VMG menus are larger than one VOB file")
