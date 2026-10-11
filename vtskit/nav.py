@@ -171,14 +171,18 @@ def _subpicture_sync(stream, vs):
     return out
 
 
-def fill(data, cells, lbn=0, uops=0, stream=None):
+HLI = 0x60                 # the highlight information in the PCI data, to 0x316
+
+
+def fill(data, cells, lbn=0, uops=0, stream=None, hli=None):
     """Fill the navigation packs of a VOB in place (a bytearray or a
     writable mmap).
 
     `cells`: [(vob id, cell id, first VOBU index, last VOBU index)], every
     VOBU in one cell. `lbn`: the sector of the stream's first pack in the
-    titleset's VOBs. `stream`: the stream already scanned, if it is.
-    Returns the VOBUs."""
+    titleset's VOBs. `stream`: the stream already scanned, if it is. `hli`:
+    {vob id: the highlight information (buttons) of its menu, 0x2B6 bytes},
+    written into every navigation pack of that VOB. Returns the VOBUs."""
     stream = stream or ps.scan(data)
     vs = vobus(stream)
     covered = [None] * len(vs)
@@ -206,6 +210,10 @@ def fill(data, cells, lbn=0, uops=0, stream=None):
         pci = bytearray(0x3D4 - 1)
         struct.pack_into(">IIIIIII", pci, 0, lbn + v.start, 0, uops,
                          v.s_ptm, v.e_ptm, 0, int.from_bytes(eltm, "big"))
+        if hli and vob_id in hli:
+            if len(hli[vob_id]) != 0x316 - HLI:
+                raise VtsError("the highlight information is 0x2B6 bytes")
+            pci[HLI:0x316] = hli[vob_id]
         dsi = bytearray(0x3FA - 1)
         # (fewer than three reference pictures: the last one's end again,
         # as dvdauthor writes it)
