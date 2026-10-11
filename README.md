@@ -2,9 +2,11 @@
 
 # vtskit
 
-**Planned:** DVD-Video authoring in pure Python. vtskit will write VIDEO_TS
-itself: the IFO files, the VOBs' navigation packs, menus and the DVD's
-navigation commands. This repository holds the plan; there is no code yet.
+**In the works:** DVD-Video authoring in pure Python, to replace dvdauthor.
+vtskit will write VIDEO_TS itself: the IFO files, the VOBs' navigation
+packs, menus and the DVD's navigation commands. The writer itself is not
+here yet; the plan is, and the tools it will be checked with (see
+[What is here now](#what-is-here-now)).
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
