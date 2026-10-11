@@ -72,8 +72,10 @@ Step 1 is under way: titlesets without menus, and what they are checked with.
   a program chain a title (programs and cells one a chapter, its pre, post
   and cell commands given as bytes), the time maps, the cell and VOBU
   address tables. A chapter starts at the VOBU nearest its time, as
-  dvdauthor places it. Angles, menus, the VMG and a command compiler are not
-  written yet.
+  dvdauthor places it. Angles, menus and the VMG are not written yet.
+* `vtskit.vm` encodes the navigation commands (dvdinfo vmi.html): jumps,
+  calls and links, the system and general registers, and `If` blocks
+  assembled into Goto lines the way dvdauthor compiles its language.
 * `vtskit.nav` fills the navigation packs of a VOB: the PCI (times) and DSI
   (where the VOBU and its reference pictures end, where the VOBUs 0.5 s to
   120 s away start, where its sound and subtitles start). `vtskit.ps` reads
@@ -87,10 +89,12 @@ The tests give the same titles to dvdauthor and to vtskit, and the IFO and
 the VOBs must be the same byte for byte: NTSC and PAL, 4:3 and 16:9,
 chapters on and between VOBU starts, two titles in a titleset, AC-3, LPCM
 and MPEG sound with languages, B-pictures, short GOPs, a 40-second title,
-a subtitle track. A disc made of dvdauthor's VMG and vtskit's titleset
-plays its chapters in order under libdvdnav
+a subtitle track; every command form is the bytes dvdauthor compiles for
+the same statement. A disc made of dvdauthor's VMG and vtskit's titleset
+plays its chapters in order under libdvdnav, and its commands jump between
+its titles
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
-it needs is missing). The VMG and the command compiler come next.
+it needs is missing). The VMG comes next.
 
 `vtskit.ifo` and `tests/dvdnav_sim.py` come from
 [oncemore](https://github.com/kajisho5/oncemore) (its `layerbreak.py` and

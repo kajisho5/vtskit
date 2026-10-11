@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import unittest
 
-from vtskit import VtsError, ifo, ps, titleset
+from vtskit import VtsError, ifo, ps, titleset, vm
 from vtskit.titleset import Audio, Subpicture, Title
 
 try:
@@ -177,6 +177,41 @@ class TestAgainstDvdauthor(unittest.TestCase):
         self.assertEqual(seen, [(1, 1), (1, 2), (1, 3)])
         self.assertTrue(d.stopped)
 
+    @unittest.skipUnless(LIBDVDNAV, "needs libdvdnav")
+    def test_commands_run(self):
+        # the first title's post command jumps to the second title, and the
+        # second's first chapter ends its program chain (a cell command), so
+        # its post runs: into title 1 again, chapter 2
+        a, b = os.path.join(self.tmp, "a.mpg"), os.path.join(self.tmp, "b.mpg")
+        encode(a, seconds=4)
+        encode(b, seconds=4)
+        theirs = author(self.tmp, "ntsc", "", "", [(a, "0,2"), (b, "0,2")])
+        mine = os.path.join(self.tmp, "mine")
+        ts = titleset.write(mine, 1, [
+            Title(a, (0, 2), post=vm.assemble([vm.jump_vts_tt(2)])),
+            Title(b, (0, 2), cell_commands={1: vm.link(vm.TAIL_PGC).encode()},
+                  post=vm.assemble([vm.If(vm.compare(vm.GPRM(0), vm.EQ, 0),
+                                          [vm.set_gprm(0, vm.MOV, 1), vm.jump_vts_ptt(1, 2)])])),
+        ])
+        disc = os.path.join(self.tmp, "disc", "VIDEO_TS")
+        shutil.copytree(theirs, disc)
+        for name in ts.files:
+            shutil.copy(os.path.join(mine, name), os.path.join(disc, name))
+        seen = []
+        with dvdnav_sim.DvdSim(disc, LIBDVDNAV) as d:
+            self.assertEqual(d.wait_title(), (1, 1))
+            for _ in range(400_000):
+                if d.step() == dvdnav_sim.EV_NAV_PACKET and d.domain() == "title":
+                    tp = d.title_part()
+                    if not seen or seen[-1] != tp:
+                        seen.append(tp)
+                if d.stopped:
+                    break
+        # title 1 whole, title 2's first chapter only, title 1 from chapter 2,
+        # title 2's first chapter again, then its post falls through (g0 is 1)
+        self.assertEqual(seen, [(1, 1), (1, 2), (2, 1), (1, 2), (2, 1)])
+        self.assertTrue(d.stopped)
+
     def test_refused(self):
         mpg = os.path.join(self.tmp, "a.mpg")
         encode(mpg, seconds=2)
@@ -188,6 +223,8 @@ class TestAgainstDvdauthor(unittest.TestCase):
             titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, audio=(Audio("eng"),))])
         with self.assertRaisesRegex(VtsError, "8 bytes"):
             titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, post=(b"\x30",))])
+        with self.assertRaisesRegex(VtsError, "cell command"):
+            titleset.write(os.path.join(self.tmp, "x"), 1, [Title(mpg, cell_commands={2: titleset.EXIT})])
         pal = os.path.join(self.tmp, "b.mpg")
         encode(pal, "pal", 2)
         with self.assertRaisesRegex(VtsError, "differs"):
