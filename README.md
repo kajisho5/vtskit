@@ -8,8 +8,8 @@ subtitles, angle blocks and the DVD's navigation commands, which it also
 compiles from dvdauthor's command language. Where dvdauthor writes the same
 thing, vtskit's bytes are dvdauthor's (see
 [What is here now](#what-is-here-now)); [oncemore](https://github.com/kajisho5/oncemore)
-writes its discs with it ([oncemore#90](https://github.com/kajisho5/oncemore/pull/90),
-angles in [#91](https://github.com/kajisho5/oncemore/pull/91)).
+writes its discs with it since [oncemore#90](https://github.com/kajisho5/oncemore/pull/90)
+(angles since [#91](https://github.com/kajisho5/oncemore/pull/91)).
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
@@ -67,8 +67,9 @@ play the discs vtskit writes.
 
 ## What is here now
 
-Steps 1 to 3 of the plan are in: discs with titles, menus, subtitles and
-angles, dvdauthor's command language, and what they are checked with.
+The four steps of the plan are in: discs with titles, menus, subtitles and
+angles, dvdauthor's command language, what they are checked with, and
+oncemore writing its discs with vtskit.
 
 * `vtskit.titleset` writes a titleset: the title VOBs (one a title, cut
   into files under 1 GiB) with their navigation packs filled, and
@@ -137,10 +138,10 @@ switches angles under libdvdnav, every pointer of its navigation packs
 landing on the unit it names (dvdauthor writes no angles, so a set-top
 player is the check still owed)
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
-it needs is missing). oncemore's switch to vtskit (step 4) is
+it needs is missing). oncemore's switch to vtskit (step 4) is merged:
 [oncemore#90](https://github.com/kajisho5/oncemore/pull/90) and
-[#91](https://github.com/kajisho5/oncemore/pull/91), which keep a copy of
-`vtskit/` as `oncemore/_vendor/vtskit`.
+[#91](https://github.com/kajisho5/oncemore/pull/91) keep a copy of `vtskit/`
+as `oncemore/_vendor/vtskit`.
 
 `vtskit.ifo` and `tests/dvdnav_sim.py` come from
 [oncemore](https://github.com/kajisho5/oncemore) (its `layerbreak.py` and
