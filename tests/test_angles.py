@@ -1,7 +1,7 @@
 """Angle blocks (vtskit.titleset.Angles): the interleaved layout, every
 pointer of the navigation packs landing where the descriptions say, the
-cells and tables of the IFO, and libdvdnav playing and switching the
-angles. dvdauthor writes no angles, so there is nothing of its to compare
+cells and tables of the IFO, libdvdnav playing and switching the angles,
+and the pictures it hands a player decoded, through a switch. dvdauthor writes no angles, so there is nothing of its to compare
 with; the structure is checked against itself and the descriptions."""
 
 import os
@@ -23,15 +23,59 @@ except Exception:  # pragma: no cover
 TOOLS_OK = bool(shutil.which("ffmpeg"))
 
 
-def encode(path, seconds, colour, gop=15):
+def encode(path, seconds, colour, gop=15, extra=()):
     """A stream like oncemore's, a coloured frame around the test picture;
     the same arguments give angles the same GOPs and VOBUs."""
     subprocess.run(["ffmpeg", "-hide_banner", "-v", "error", "-y",
                     "-f", "lavfi", "-i", f"testsrc2=s=720x480:r=30000/1001:d={seconds}",
                     "-f", "lavfi", "-i", f"sine=f=440:d={seconds}",
                     "-vf", f"drawbox=c={colour}:t=40", "-target", "ntsc-dvd", "-aspect", "4:3",
-                    "-b:v", "3000k", "-g", str(gop), "-sc_threshold", "1000000000",
+                    "-b:v", "3000k", "-g", str(gop), "-sc_threshold", "1000000000", *extra,
                     "-c:a", "ac3", "-ac", "2", path], check=True)
+
+
+def border(path, frames=None):
+    """The colour of each picture's frame (the drawbox), as (Y, Cb, Cr)."""
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path] +
+                         (["-frames:v", str(frames)] if frames else []) +
+                         ["-vf", "crop=20:20:5:5,scale=1:1:flags=area,format=yuv444p",
+                          "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+    return [tuple(raw[i:i + 3]) for i in range(0, len(raw), 3)]
+
+
+def play(disc, switch=None):
+    """What libdvdnav hands a player, title domain only, as one program
+    stream (the VOBUs as delivered, navigation packs included), and the
+    angle switches made: `switch` = (after that many navigation packs, to
+    angle n)."""
+    blocks, done = [], []
+    with dvdnav_sim.DvdSim(disc, LIBDVDNAV) as d:
+        d.wait_title()
+        navs = 0
+        for _ in range(2_000_000):
+            e = d.step()
+            if e in (dvdnav_sim.EV_BLOCK_OK, dvdnav_sim.EV_NAV_PACKET) and d.domain() == "title":
+                blocks.append(bytes(d.buf.raw[:2048]))
+            if e == dvdnav_sim.EV_NAV_PACKET and d.domain() == "title":
+                navs += 1
+                if switch and not done and navs == switch[0]:
+                    done.append(d.change_angle(switch[1]))
+            if d.stopped:
+                break
+    return b"".join(blocks), done
+
+
+def runs(colours, names):
+    """The colours as [(name, pictures in a row)], each picture named after
+    the nearest of `names` ({name: (Y, Cb, Cr)})."""
+    out = []
+    for c in colours:
+        n = min(names, key=lambda k: sum((a - b) ** 2 for a, b in zip(names[k], c)))
+        if out and out[-1][0] == n:
+            out[-1][1] += 1
+        else:
+            out.append([n, 1])
+    return [tuple(x) for x in out]
 
 
 def u32(b, o):
@@ -109,7 +153,10 @@ class TestAngleBlock(unittest.TestCase):
         # block, interleaved, the first stretch with STC discontinuity, the
         # second seamless and "seamless angle linked in DSI"
         self.assertEqual(cats[0], 0x02)
-        self.assertEqual(cats[1:4], [0x40 | 0x10 | 0x04 | 0x02, 0x80 | 0x10 | 0x04 | 0x02, 0xC0 | 0x10 | 0x04 | 0x02])
+        # (every cell of a seamless block is "seamless angle linked in DSI",
+        # the first stretch's too: libdvdnav switches it at a unit's end)
+        self.assertEqual(cats[1:4], [0x40 | 0x10 | 0x04 | 0x02 | 0x01, 0x80 | 0x10 | 0x04 | 0x02 | 0x01,
+                                     0xC0 | 0x10 | 0x04 | 0x02 | 0x01])
         self.assertEqual(cats[4:7], [0x40 | 0x10 | 0x08 | 0x04 | 0x01, 0x80 | 0x10 | 0x08 | 0x04 | 0x01,
                                      0xC0 | 0x10 | 0x08 | 0x04 | 0x01])
         self.assertEqual(cats[7], 0x02)
@@ -200,17 +247,8 @@ class TestAngleBlock(unittest.TestCase):
                     self.assertTrue(u16(tdsi, 0x20) & 0x2000)
                     self.assertEqual(size, u32(tdsi, 0x22) + 1)
                     self.assertGreater(target, unit_end)
-            # NSML_AGLI: every angle's VOBU of the same moment
-            for b in range(9):
-                dsta = u32(pci, 0x3C + 4 * b)
-                if b >= 3:
-                    self.assertEqual(dsta, 0)
-                    continue
-                target = s + (dsta & 0x7FFFFFFF) * (-1 if dsta & 0x80000000 else 1)
-                tpci, tdsi = self.navs[target]
-                self.assertEqual(u16(tdsi, 0x18), 2 + b)
-                self.assertEqual(tpci[0x18:0x1C], pci[0x18:0x1C], "the same cell elapsed time")
-                self.assertEqual(tdsi[0x1B], dsi[0x1B], "the same cell")
+            # NSML_AGLI is left empty in a seamless block (TestBreak fills it)
+            self.assertEqual(pci[0x3C:0x60], bytes(36))
         # the VOB start and end times of every angle VOBU are its own VOB's
         for s in block:
             dsi = self.navs[s][1]
@@ -235,6 +273,28 @@ class TestAngleBlock(unittest.TestCase):
                     target = s + sign * (p & 0x3FFFFFFF)
                     self.assertIn(target, self.navs, f"VOBU at {s}, pointer {k}")
                     self.assertEqual(u16(self.navs[target][1], 0x18), vob, f"VOBU at {s}, pointer {k}")
+
+    @unittest.skipUnless(LIBDVDNAV, "needs libdvdnav")
+    def test_what_the_player_shows(self):
+        # the pictures libdvdnav hands a player through a switch from angle 1
+        # to 2, decoded: every picture once, in order (as many as the sources
+        # have), the switch at the end of an interleaved unit
+        stream, done = play(self.disc, switch=(9, 2))
+        self.assertEqual(done, [True])
+        path = os.path.join(self.tmp, "played.mpg")
+        with open(path, "wb") as f:
+            f.write(stream)
+        sources = [os.path.join(self.tmp, n) for n in ("intro.mpg", "outro.mpg", "plain.mpg")] + \
+            self.angles
+        names = dict(zip(("white", "black", "gray", "red", "green", "blue"),
+                         (border(p, 1)[0] for p in sources)))
+        seen = runs(border(path), names)
+        self.assertEqual([n for n, _ in seen], ["white", "red", "green", "black", "gray"], seen)
+        counts = dict(seen)
+        self.assertEqual((counts["white"], counts["black"], counts["gray"]), (90, 60, 60))
+        self.assertEqual(counts["red"] + counts["green"], 180)      # nothing twice, nothing lost
+        self.assertEqual(counts["red"] % 30, 0)                     # at a unit's end (a second)
+        self.assertGreater(counts["red"], 15 * 3)                   # (after the 9th VOBU played)
 
     @unittest.skipUnless(LIBDVDNAV, "needs libdvdnav")
     def test_libdvdnav_switches_angles(self):
@@ -268,6 +328,18 @@ class TestAngleBlock(unittest.TestCase):
         self.assertEqual([c for i, c in enumerate(chapters) if i == 0 or chapters[i - 1] != c],
                          [(1, 1), (1, 2), (1, 3), (1, 4), (2, 1)])
 
+    def test_open_groups_refused(self):
+        # B-pictures shown before a unit's I-picture lean on the group before
+        # (another angle's after a switch) unless the group is closed
+        a, b = (os.path.join(self.tmp, f"open{k}.mpg") for k in (1, 2))
+        for path, colour in ((a, "red"), (b, "green")):
+            encode(path, 4, colour, extra=("-bf", "2"))
+        with self.assertRaisesRegex(VtsError, "closed groups"):
+            titleset.write(os.path.join(self.tmp, "open"), 1, [Title(parts=(Angles((a, b)),))])
+        for path, colour in ((a, "red"), (b, "green")):
+            encode(path, 4, colour, extra=("-bf", "2", "-flags", "+cgop"))
+        titleset.write(os.path.join(self.tmp, "closed"), 1, [Title(parts=(Angles((a, b)),))])
+
     def test_refused(self):
         short = os.path.join(self.tmp, "short.mpg")
         encode(short, 4, "red")
@@ -277,6 +349,68 @@ class TestAngleBlock(unittest.TestCase):
             titleset.write(os.path.join(self.tmp, "x"), 1, [Title(parts=(Angles((self.angles[0],)),))])
         with self.assertRaisesRegex(VtsError, "not both"):
             titleset.write(os.path.join(self.tmp, "x"), 1, [Title(self.angles[0], parts=(self.angles[1],))])
+
+
+@unittest.skipUnless(TOOLS_OK, "needs ffmpeg")
+class TestBreak(unittest.TestCase):
+    """A title that is one angle block, switched with a break (not
+    seamless), as a title of oncemore's angles is laid out: NSML_AGLI
+    filled, SML_AGLI empty, cells not marked seamless."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="vtskit-angles-break-")
+        cls.angles = [os.path.join(cls.tmp, f"angle{k}.mpg") for k in range(2)]
+        for path, colour in zip(cls.angles, ("red", "green")):
+            encode(path, 4, colour)
+        cls.disc = os.path.join(cls.tmp, "disc")
+        cls.ts = titleset.write(cls.disc, 1, [Title(parts=(Angles(tuple(cls.angles), seamless=False),),
+                                                    chapters=(0, 2))])
+        vmg.write(cls.disc, [cls.ts])
+        cls.ifo = open(os.path.join(cls.disc, "VTS_01_0.IFO"), "rb").read()
+        cls.vob = b"".join(open(os.path.join(cls.disc, n), "rb").read()
+                           for n in sorted(cls.ts.files) if n.endswith(".VOB"))
+        cls.navs = nav_packs(cls.vob)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_cells(self):
+        cells, program_map = pgc_cells(self.ifo)
+        self.assertEqual(program_map, [1, 3])
+        self.assertEqual([c[0][0] for c in cells],
+                         [0x40 | 0x10 | 0x04 | 0x02, 0xC0 | 0x10 | 0x04 | 0x02,
+                          0x40 | 0x10 | 0x04, 0xC0 | 0x10 | 0x04])
+
+    def test_pointers(self):
+        for s, (pci, dsi) in self.navs.items():
+            self.assertTrue(u16(dsi, 0x20) & 0x4000, "ILVU flag")
+            self.assertEqual(dsi[0xB4:0xB4 + 54], bytes(54), "SML_AGLI empty")
+            for b in range(9):
+                dsta = u32(pci, 0x3C + 4 * b)
+                if b >= 2:
+                    self.assertEqual(dsta, 0)
+                    continue
+                target = s + (dsta & 0x7FFFFFFF) * (-1 if dsta & 0x80000000 else 1)
+                tpci, tdsi = self.navs[target]
+                self.assertEqual(u16(tdsi, 0x18), 1 + b)
+                self.assertEqual(tpci[0x18:0x1C], pci[0x18:0x1C], "the same cell elapsed time")
+                self.assertEqual(tdsi[0x1B], dsi[0x1B], "the same cell")
+
+    @unittest.skipUnless(LIBDVDNAV, "needs libdvdnav")
+    def test_switches(self):
+        stream, done = play(self.disc, switch=(3, 2))
+        self.assertEqual(done, [True])
+        path = os.path.join(self.tmp, "played.mpg")
+        with open(path, "wb") as f:
+            f.write(stream)
+        names = {"red": border(self.angles[0], 1)[0], "green": border(self.angles[1], 1)[0]}
+        seen = runs(border(path), names)
+        # angle 1, then angle 2 to the end (from the moment it was at: a
+        # VOBU may come again, as a break)
+        self.assertEqual([n for n, _ in seen], ["red", "green"], seen)
+        self.assertGreaterEqual(sum(n for _, n in seen), 120)
 
 
 if __name__ == "__main__":
