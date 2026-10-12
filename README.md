@@ -124,7 +124,15 @@ oncemore writing its discs with vtskit.
   VOBU of the same moment (NSML_AGLI). Only one of the two is filled, as
   players take NSML_AGLI whenever it is there. A stream whose interleaved
   units start with open groups of pictures (B-pictures leaning on the group
-  before, another angle's after a switch) is refused.
+  before, another angle's after a switch) is refused. A title may carry
+  buttons over stretches of it (`vtskit.menu.TitleButtons`: from a start
+  to an end, the buttons, the palette entries that draw them): their
+  overlay is a forced subpicture added with `vtskit.subtitles`, and the
+  highlight information goes only into the VOBUs that play during the
+  stretch, with the stretch's start and end as its start time, end time
+  and the end of the selection (dvdinfo's hli_s_ptm, hli_e_ptm,
+  btn_sl_e_ptm). dvdauthor gives a title's buttons the whole title (every
+  VOBU, never ending), which is what buttons without an end write.
 * `vtskit.subtitles` adds subtitles to a title's program stream, as spumux
   does: each cue a picture of up to four colours placed on the screen and
   shown for a while, as subpicture packs a little before their time.
@@ -165,7 +173,8 @@ dvdauthor's (its buttons made with spumux), and a menu's overlay in a
 normal colour is spumux's unit byte for byte; subtitles muxed by vtskit are
 spumux's units, placed where spumux places them, and the title written
 from that stream (4:3, and 16:9 with and without pan-scan or letterbox) is
-dvdauthor's. A VIDEO_TS written by vtskit alone plays
+dvdauthor's; a title with buttons over the whole of it is dvdauthor's
+VOB byte for byte. A VIDEO_TS written by vtskit alone plays
 its titles and chapters in order under libdvdnav, its commands jumping
 between titles, its menus' buttons lead where they say, and its jumps into
 another titleset's chapters land; a title with an angle block plays and
@@ -173,7 +182,9 @@ switches angles under libdvdnav, every pointer of its navigation packs
 landing on the unit it names, and the pictures libdvdnav hands a player
 through a switch, decoded with ffmpeg, are every picture once, in order,
 the new angle from the end of a unit (dvdauthor writes no angles, so a
-set-top player is the check still owed)
+set-top player is the check still owed); a title's buttons over a stretch
+are offered by libdvdnav in that stretch's VOBUs alone, and run their
+commands
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
 it needs is missing). oncemore's switch to vtskit (step 4) is merged:
 [oncemore#90](https://github.com/kajisho5/oncemore/pull/90) and

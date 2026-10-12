@@ -117,7 +117,11 @@ class Title:
     writes none (titles are chained with commands instead). Under
     libdvdnav, a title whose post commands run out plays on into its next
     program chain, and one without a next stops (tests/test_titleset.py);
-    what players make of them is otherwise not described."""
+    what players make of them is otherwise not described.
+
+    `buttons`: vtskit.menu.TitleButtons, buttons over stretches of the
+    title that do not overlap; their overlays must be in the stream
+    already (TitleButtons.cue, vtskit.subtitles.mux)."""
     stream: str | None = None
     chapters: tuple = (0.0,)
     audio: tuple = ()
@@ -132,6 +136,7 @@ class Title:
     next_pgc: int = 0
     prev_pgc: int = 0
     up_pgc: int = 0
+    buttons: tuple = ()     # vtskit.menu.TitleButtons over stretches of the title
 
 
 @dataclass
@@ -545,18 +550,31 @@ def _clean_starts(where, stream, vs, starts):
 def _title(number, title, offset, vob_id):
     """Read a title's parts, place its chapters, lay its VOBUs on the disc
     (interleaving the angle blocks) and fill their navigation packs:
-    (WrittenTitle, the next free sector, the next VOB id)."""
+    (WrittenTitle, the next free sector, the next VOB id). The streams
+    read are closed again if the title is refused."""
+    loaded = []                 # a part: [(stream, vobus, bytes)] one an angle
+    try:
+        return _lay_title(number, title, offset, vob_id, loaded)
+    except BaseException:
+        for part in loaded:
+            for _, _, buffer in part:
+                _close(buffer)
+        raise
+
+
+def _lay_title(number, title, offset, vob_id, loaded):
     parts = title.parts or (title.stream,)
     if not parts or title.stream and title.parts:
         raise VtsError(f"title {number}: give a stream or parts, not both")
-    loaded = []                 # a part: [(stream, vobus, bytes)] one an angle
     for k, part in enumerate(parts, 1):
         if isinstance(part, Angles):
             if not 2 <= len(part.streams) <= 9:
                 raise VtsError(f"title {number}, part {k}: 2 to 9 angles")
-            angles = [_load(p) for p in part.streams]
-            _aligned(angles, f"title {number}, part {k}")
+            angles = []
             loaded.append(angles)
+            for p in part.streams:
+                angles.append(_load(p))
+            _aligned(angles, f"title {number}, part {k}")
         elif isinstance(part, str):
             loaded.append([_load(part)])
         else:
@@ -703,13 +721,14 @@ def _title(number, title, offset, vob_id):
         for a in range(n_angles):
             jobs.append((k, a, vob_id + a))
         vob_id += n_angles
+    highlights = _title_buttons(number, title, loaded, part_start)
     # fill every VOB now that every sector, and every flag of the VOBUs
     # before an angle block, is known
     for k, a, vid in jobs:
         st, vs, vob = loaded[k][a]
         vob_cells = [(vid, c.cell_id, c.first_vobu, c.last_vobu) for c in cells if c.vob_id == vid]
         nav.fill(vob, vob_cells, stream=st, layout=layouts[(k, a)], ilvu=ilvu_info[(k, a)],
-                 nsml=nsml_info[(k, a)])
+                 nsml=nsml_info[(k, a)], highlights=highlights.get((k, a)))
         lay = layouts[(k, a)]
         if len(loaded[k]) == 1:
             chunks.append((lay[0], vob, 0, len(vob)))
@@ -727,6 +746,49 @@ def _title(number, title, offset, vob_id):
                      programs=programs, angles=max(len(p) for p in loaded), chunks=chunks,
                      timeline=timeline, end=end, vobu_sectors=vobu_sectors)
     return w, sector, vob_id
+
+
+def _title_buttons(number, title, loaded, part_start):
+    """The HLI of the title's buttons: {(part, angle): {VOBU: HLI}}, in the
+    VOBUs that play during each stretch (every angle's), shown from the
+    stretch's start to its end in the VOB's time (a stretch that began in
+    an earlier part from the VOB's start; one that goes on into a later
+    part to the VOB's end; one without an end never ending)."""
+    if not title.buttons:
+        return {}
+    width, height = loaded[0][0][0].sequence[:2]
+    stretches = []
+    for n, tb in enumerate(title.buttons, 1):
+        what = f"title {number}, buttons {n}"
+        menus_.check_title_buttons(tb, width, height, what)
+        end = None if tb.end is None else int(round(tb.end * 90000))
+        stretches.append((int(round(tb.start * 90000)), end, tb, what))
+    stretches.sort(key=lambda x: x[0])
+    for (_, e1, _, w1), (s2, _, _, w2) in zip(stretches, stretches[1:]):
+        if e1 is None or e1 > s2:
+            raise VtsError(f"{w1} and {w2} overlap in time")
+    out = {}
+    used = set()
+    for k, part in enumerate(loaded):
+        for a, (_, vs, _) in enumerate(part):
+            base, vob_end = vs[0].s_ptm, vs[-1].e_ptm
+            table = out[(k, a)] = {}
+            for s, e, tb, what in stretches:
+                for i, v in enumerate(vs):
+                    t0 = part_start[k] + v.s_ptm - base
+                    t1 = part_start[k] + v.e_ptm - base
+                    if t1 <= s or e is not None and t0 >= e:
+                        continue
+                    if i in table:
+                        raise VtsError(f"{what} start in the VOBU (part {k + 1}, VOBU {i + 1}) where "
+                                       "the buttons before end: a VOBU carries one set of buttons")
+                    he = 0xFFFFFFFF if e is None else min(base + e - part_start[k], vob_end)
+                    table[i] = tb.hli(base + max(s - part_start[k], 0), he)
+                    used.add(what)
+    for _, _, _, what in stretches:
+        if what not in used:
+            raise VtsError(f"{what} start after the title ends")
+    return out
 
 
 def _attributes(written, pan_scan, letterbox, audio, subpictures, what, captions=(False, False)):
