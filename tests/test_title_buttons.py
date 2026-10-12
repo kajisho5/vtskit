@@ -191,9 +191,28 @@ class TestTitleButtons(unittest.TestCase):
         with self.assertRaisesRegex(VtsError, "overlap"):
             write(buttons(1, None), buttons(3, 5))
         with self.assertRaisesRegex(VtsError, "one set of buttons"):
-            write(buttons(1, 2.8), buttons(2.9, 5))                   # in the VOBU from 2.4 s to 3.0 s
+            write(buttons(1, 3.0), buttons(3.05, 3.2), buttons(3.25, 5))   # in the VOBU from 3.0 s
         with self.assertRaisesRegex(VtsError, "after the title ends"):
             write(buttons(30, 40))
+
+    def test_stretches_meeting_in_a_vobu(self):
+        # the VOBUs start every 0.6006 s; where two stretches meet inside a
+        # VOBU, it carries the one covering more of it
+        def starts(*tbs):
+            """{VOBU start (s, rounded): its HLI's start from the title's start}"""
+            out = os.path.join(self.tmp, "meeting")
+            titleset.write(out, 1, [Title(self.plain, audio=(Audio("en", 2),), buttons=tbs)])
+            packs = navs(read(f"{out}/VTS_01_1.VOB"))
+            s0 = packs[0][1]
+            return {round((s - s0) / 90000, 1): struct.unpack_from(">I", h, 2)[0] - s0 if h[1] else None
+                    for _, s, h in packs}
+        got = starts(buttons(1, 2.8), buttons(2.9, 5))
+        self.assertEqual((got[1.8], got[2.4], got[3.0]), (90000, 90000, 261000))
+        # buttons that change a frame before or after a VOBU's start (as a
+        # film title's frames fall): each VOBU still carries its own
+        for edge in (3.003 - 3003 / 90000, 3.003 + 3003 / 90000):
+            got = starts(buttons(1, edge), buttons(edge, 5))
+            self.assertEqual((got[2.4], got[3.0]), (90000, int(round(edge * 90000))), edge)
 
     @unittest.skipUnless(LIBDVDNAV, "needs libdvdnav")
     def test_under_libdvdnav(self):

@@ -129,7 +129,8 @@ oncemore writing its discs with vtskit.
   to an end, the buttons, the palette entries that draw them): their
   overlay is a forced subpicture added with `vtskit.subtitles`, and the
   highlight information goes only into the VOBUs that play during the
-  stretch, with the stretch's start and end as its start time, end time
+  stretch (where two stretches meet inside a VOBU, the one covering more
+  of it), with the stretch's start and end as its start time, end time
   and the end of the selection (dvdinfo's hli_s_ptm, hli_e_ptm,
   btn_sl_e_ptm). dvdauthor gives a title's buttons the whole title (every
   VOBU, never ending), which is what buttons without an end write. As

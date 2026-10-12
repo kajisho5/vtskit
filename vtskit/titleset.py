@@ -762,7 +762,11 @@ def _title_buttons(number, title, loaded, part_start):
     VOBUs that play during each stretch (every angle's), shown from the
     stretch's start to its end in the VOB's time (a stretch that began in
     an earlier part from the VOB's start; one that goes on into a later
-    part to the VOB's end; one without an end never ending)."""
+    part to the VOB's end; one without an end never ending). Where two
+    stretches meet inside a VOBU, it carries the one that covers more of
+    it: buttons that change between VOBUs (oncemore starts a VOBU there)
+    are not lost to a picture's difference between a time and the VOBU's
+    start, as in a film title with pulldown."""
     if not title.buttons:
         return {}
     width, height = loaded[0][0][0].sequence[:2]
@@ -777,26 +781,35 @@ def _title_buttons(number, title, loaded, part_start):
         if e1 is None or e1 > s2:
             raise VtsError(f"{w1} and {w2} overlap in time")
     out = {}
-    used = set()
+    touched, used = set(), set()
     for k, part in enumerate(loaded):
         for a, (_, vs, _) in enumerate(part):
             base, vob_end = vs[0].s_ptm, vs[-1].e_ptm
             table = out[(k, a)] = {}
-            for s, e, tb, what in stretches:
-                for i, v in enumerate(vs):
-                    t0 = part_start[k] + v.s_ptm - base
-                    t1 = part_start[k] + v.e_ptm - base
-                    if t1 <= s or e is not None and t0 >= e:
-                        continue
-                    if i in table:
-                        raise VtsError(f"{what} start in the VOBU (part {k + 1}, VOBU {i + 1}) where "
-                                       "the buttons before end: a VOBU carries one set of buttons")
-                    he = 0xFFFFFFFF if e is None else min(base + e - part_start[k], vob_end)
-                    table[i] = tb.hli(base + max(s - part_start[k], 0), he)
-                    used.add(what)
+            for i, v in enumerate(vs):
+                t0 = part_start[k] + v.s_ptm - base
+                t1 = part_start[k] + v.e_ptm - base
+                # (two stretches in a VOBU: the one covering more of it, the
+                # later on a tie; a VOBU carries one set of buttons)
+                best = None
+                for s, e, tb, what in stretches:
+                    cover = min(t1, e if e is not None else t1) - max(t0, s)
+                    if cover > 0:
+                        touched.add(what)
+                        if best is None or cover >= best[0]:
+                            best = (cover, s, e, tb, what)
+                if best is None:
+                    continue
+                _, s, e, tb, what = best
+                he = 0xFFFFFFFF if e is None else min(base + e - part_start[k], vob_end)
+                table[i] = tb.hli(base + max(s - part_start[k], 0), he)
+                used.add(what)
     for _, _, _, what in stretches:
-        if what not in used:
+        if what not in touched:
             raise VtsError(f"{what} start after the title ends")
+        if what not in used:
+            raise VtsError(f"{what} are shown for less of each VOBU they fall in than the buttons "
+                           "beside them: a VOBU carries one set of buttons")
     return out
 
 
