@@ -63,7 +63,7 @@ import os
 import struct
 from dataclasses import dataclass, field
 
-from . import menu as menus_, nav, ps, spu
+from . import menu as menus_, nav, ps, spu, vm
 from .errors import VtsError
 
 SECTOR = ps.SECTOR
@@ -748,6 +748,15 @@ def _lay_title(number, title, offset, vob_id, loaded):
     return w, sector, vob_id
 
 
+def _pre(title):
+    """A title's pre commands: with buttons, first the first button
+    highlighted (SetHL_BTNN 1), as dvdauthor writes it for a title with
+    buttons (tests/test_title_buttons.py)."""
+    if not title.buttons:
+        return tuple(title.pre)
+    return (vm.set_hl_btnn(1 << 10).encode(),) + tuple(title.pre)
+
+
 def _title_buttons(number, title, loaded, part_start):
     """The HLI of the title's buttons: {(part, angle): {VOBU: HLI}}, in the
     VOBUs that play during each stretch (every angle's), shown from the
@@ -955,7 +964,7 @@ def _write(folder, vts, titles, written, menus, language, pan_scan, letterbox, c
         for name in ("next_pgc", "prev_pgc", "up_pgc"):
             if not 0 <= getattr(t, name) <= len(titles):
                 raise VtsError(f"title {n}: {name} {getattr(t, name)}: the titleset has {len(titles)} program chains")
-    pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, sorted(w.stream.subpictures), t.palette,
+    pgcs = [_pgc((_pre(t), t.post, t.cell_commands), w, frame, sorted(w.stream.subpictures), t.palette,
                  stills=t.stills, uops=t.uops, video=video, links=(t.next_pgc, t.prev_pgc, t.up_pgc))
             for t, w in zip(titles, written)]
     pgci = struct.pack(">HHI", len(pgcs), 0, 0)

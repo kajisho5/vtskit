@@ -13,7 +13,7 @@ import sys
 import tempfile
 import unittest
 
-from vtskit import VtsError, menu, ps, spu, subtitles, titleset, vm, vmg
+from vtskit import VtsError, lang, menu, ps, spu, subtitles, titleset, vm, vmg
 from vtskit.menu import Button, TitleButtons
 from vtskit.titleset import Audio, Title
 
@@ -104,7 +104,7 @@ class TestTitleButtons(unittest.TestCase):
     def test_whole_title_as_dvdauthor(self):
         # spumux's buttons over the whole title, then dvdauthor; vtskit
         # given the same stream and buttons without an end writes the same
-        # VOB (dvdauthor writes the HLI in every VOBU, never ending)
+        # VOB (dvdauthor writes the HLI in every VOBU, never ending) and IFO
         t = self.tmp
         png(f"{t}/hl.png", 720, 480, RECTS, (255, 255, 0))
         png(f"{t}/sel.png", 720, 480, RECTS, (255, 0, 0))
@@ -118,17 +118,35 @@ class TestTitleButtons(unittest.TestCase):
         with open(self.plain, "rb") as src, open(sp, "wb") as dst:
             subprocess.run(["spumux", "-s", "0", f"{t}/spu.xml"], stdin=src, stdout=dst, check=True,
                            stderr=subprocess.DEVNULL, env=ENV)
+        texts = ["g1 = 2; g2 = 3; jump title 2 chapter 1;", "exit;"]
         with open(f"{t}/dvd.xml", "w") as f:
             f.write(f'<dvdauthor dest="{t}/dvd"><vmgm/><titleset><titles>'
                     '<video format="ntsc" aspect="4:3"/><audio format="ac3" channels="2" lang="en"/>'
-                    f'<pgc><vob file="{sp}"/><button name="b1">jump title 1 chapter 1;</button>'
-                    '<button name="b2">exit;</button></pgc></titles></titleset></dvdauthor>')
+                    f'<pgc><vob file="{sp}"/><button name="b1">{texts[0]}</button>'
+                    f'<button name="b2">{texts[1]}</button><post>jump title 2;</post></pgc>'
+                    f'<pgc><vob file="{self.short}"/></pgc></titles></titleset></dvdauthor>')
         subprocess.run(["dvdauthor", "-x", f"{t}/dvd.xml"], check=True, capture_output=True, env=ENV)
+        # vtskit: the same buttons compiled with vtskit.lang (a button of
+        # several commands runs them from the post, through a dispatcher)
+        disc = lang.Disc({(1, 1): 1, (1, 2): 2}, titlesets={1: lang.Menus()})
+        commands, post = disc.menu(texts, "jump title 2;", "vts", 1)
+        tb = buttons(0, None)
+        for b, c in zip(tb.buttons, commands):
+            b.command = c
         mine = f"{t}/mine-whole"
-        titleset.write(mine, 1, [Title(sp, audio=(Audio("en", 2),), buttons=(buttons(0, None),))])
-        a, b = read(f"{mine}/VTS_01_1.VOB"), read(f"{t}/dvd/VIDEO_TS/VTS_01_1.VOB")
+        titleset.write(mine, 1, [Title(sp, audio=(Audio("en", 2),), post=tuple(post), buttons=(tb,)),
+                                 Title(self.short, audio=(Audio("en", 2),))])
+        theirs = f"{t}/dvd/VIDEO_TS"
+        a, b = read(f"{mine}/VTS_01_1.VOB"), read(f"{theirs}/VTS_01_1.VOB")
         self.assertEqual([n[2] for n in navs(a)], [n[2] for n in navs(b)])
         self.assertEqual(a, b)
+        # the IFO: the same, the title's pre (SetHL_BTNN 1) and post
+        # included, but for the palette (spumux's colours)
+        a, b = read(f"{mine}/VTS_01_0.IFO"), read(f"{theirs}/VTS_01_0.IFO")
+        self.assertEqual(len(a), len(b))
+        pgc = struct.unpack_from(">I", a, 0xCC)[0] * 2048 + 16
+        self.assertEqual(a[:pgc + 0xA4], b[:pgc + 0xA4])
+        self.assertEqual(a[pgc + 0xE4:], b[pgc + 0xE4:])
 
     def stretch_disc(self, start, end):
         """Title 1 (10 s) with buttons from `start` to `end` (button 1:

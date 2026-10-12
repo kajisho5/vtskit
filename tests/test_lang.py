@@ -138,6 +138,17 @@ class TestForms(unittest.TestCase):
         self.assertEqual(hexes(self.d.compile("g1 = 0; exit;", "vts", 1)), ["7100000100000000", "3001000000000000"])
         self.assertEqual(hexes(self.d.compile("call menu entry root resume 3;", "vts", 1)), ["3008000003830000"])
 
+    def test_title_buttons(self):
+        # dvdauthor's bytes for the same buttons in a title's <pgc>, with
+        # <post>jump title 2;</post>: the same dispatcher as a menu's
+        buttons, post = self.d.menu(["g1 = 2; g2 = 3; jump title 2 chapter 1;", "g3 = 4; g4 = 5; jump title 2;"],
+                                    "jump title 2;", "vts", 1)
+        self.assertEqual(hexes(buttons), ["7101000f0001000d", "7101000f0002000d"])
+        self.assertEqual(hexes(post), ["6100000e000f0000", "7100000f00000000", "00a1000e00010006",
+                                       "00a1000e00020009", "3003000000020000", "7100000100020000",
+                                       "7100000200030000", "3005000100020000", "7100000300040000",
+                                       "7100000400050000", "3003000000020000"])
+
     def test_dead_code_after_a_jump(self):
         self.assertEqual(hexes(self.d.compile("g1 = 0; resume; g1 = 0; jump title 1 chapter 2; "
                                               "subtitle = 65; audio = 1;", "vtsm", 1)),
@@ -191,7 +202,7 @@ class TestForms(unittest.TestCase):
         with self.assertRaises(VtsError):
             self.d.menu(["g1 = 1; g2 = 2;"], "g3 = 3;", "vtsm", 1)   # post that does not leave
         with self.assertRaises(VtsError):
-            self.d.menu(["exit;"], "exit;", "vts", 1)
+            self.d.menu(["exit;"], "exit;", "fp")                   # no buttons in the first play
 
 
 def author(folder, menu_n, menu_h, a, b):

@@ -132,7 +132,9 @@ oncemore writing its discs with vtskit.
   stretch, with the stretch's start and end as its start time, end time
   and the end of the selection (dvdinfo's hli_s_ptm, hli_e_ptm,
   btn_sl_e_ptm). dvdauthor gives a title's buttons the whole title (every
-  VOBU, never ending), which is what buttons without an end write.
+  VOBU, never ending), which is what buttons without an end write. As
+  dvdauthor does, a title with buttons starts with its first button
+  highlighted (SetHL_BTNN 1 before its own pre commands).
 * `vtskit.subtitles` adds subtitles to a title's program stream, as spumux
   does: each cue a picture of up to four colours placed on the screen and
   shown for a while, as subpicture packs a little before their time.
@@ -140,8 +142,8 @@ oncemore writing its discs with vtskit.
   `if (g5 != 0) { button = g5; }`, `call menu entry root;`) for the domain
   a text runs in, to the same commands dvdauthor writes for it: a tool
   that already speaks the language, as oncemore does, keeps its text. A
-  button of several commands runs them from the menu's post through a
-  dispatcher, and a jump to a chapter of another titleset goes through pad
+  button of several commands, a menu's or a title's, runs them from the
+  program chain's post through a dispatcher, and a jump to a chapter of another titleset goes through pad
   program chains, as dvdauthor's "jumppads" do.
 * `vtskit.vmg` writes the video manager: VIDEO_TS.IFO and its BUP, with
   the first-play commands, the table of titles and the titlesets'
@@ -173,8 +175,9 @@ dvdauthor's (its buttons made with spumux), and a menu's overlay in a
 normal colour is spumux's unit byte for byte; subtitles muxed by vtskit are
 spumux's units, placed where spumux places them, and the title written
 from that stream (4:3, and 16:9 with and without pan-scan or letterbox) is
-dvdauthor's; a title with buttons over the whole of it is dvdauthor's
-VOB byte for byte. A VIDEO_TS written by vtskit alone plays
+dvdauthor's; a title with buttons over the whole of it (one of them of
+several commands) is dvdauthor's VOB and IFO byte for byte, but for the
+palette. A VIDEO_TS written by vtskit alone plays
 its titles and chapters in order under libdvdnav, its commands jumping
 between titles, its menus' buttons lead where they say, and its jumps into
 another titleset's chapters land; a title with an angle block plays and
