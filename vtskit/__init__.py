@@ -21,5 +21,5 @@ subtitles and angles, and dvdauthor's command language:
 
 from .errors import VtsError
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = ["VtsError"]

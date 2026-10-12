@@ -25,10 +25,10 @@ authored):
 * `audio = 1; subtitle = 65;` next to each other are one SetSTN; `g1 = 0;
   jump menu 2;` is one command (vtskit.vm folds a Set and a Link), and
   what follows an unconditional jump in a block is left out;
-* a menu's button runs one command: a button whose text compiles to more
-  sets GPRM 15 to its number and links to the end of the program chain,
-  whose post commands start with a dispatcher (`g14 = g15; g15 = 0;` and a
-  Goto per such button) and end with each button's code;
+* a menu's or a title's button runs one command: a button whose text
+  compiles to more sets GPRM 15 to its number and links to the end of the
+  program chain, whose post commands start with a dispatcher (`g14 = g15;
+  g15 = 0;` and a Goto per such button) and end with each button's code;
 * a jump into another titleset (dvdauthor's "jumppad") cannot be one
   command: from the video manager a jump to a chapter sets GPRM 15 to a
   code naming the title and chapter and jumps to the titleset's chapter
@@ -572,10 +572,12 @@ class Disc:
     def menu(self, buttons, post, domain="vtsm", vts=0):
         """A menu's buttons and post commands: ([one command a button],
         post commands). A button whose text takes several commands runs
-        them from the post, through a dispatcher, as dvdauthor arranges."""
+        them from the post, through a dispatcher, as dvdauthor arranges.
+        A title's buttons (domain "vts") are compiled the same way, as
+        dvdauthor compiles them."""
         self._check_domain(domain)
-        if domain not in ("vtsm", "vmgm"):
-            raise VtsError("buttons belong to menus")
+        if domain not in ("vtsm", "vmgm", "vts"):
+            raise VtsError("buttons belong to menus and titles")
         commands, deferred = [], []
         for n, text in enumerate(buttons, 1):
             items = self.instructions(text, domain, vts)

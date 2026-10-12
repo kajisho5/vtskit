@@ -63,7 +63,7 @@ import os
 import struct
 from dataclasses import dataclass, field
 
-from . import menu as menus_, nav, ps, spu
+from . import menu as menus_, nav, ps, spu, vm
 from .errors import VtsError
 
 SECTOR = ps.SECTOR
@@ -748,12 +748,25 @@ def _lay_title(number, title, offset, vob_id, loaded):
     return w, sector, vob_id
 
 
+def _pre(title):
+    """A title's pre commands: with buttons, first the first button
+    highlighted (SetHL_BTNN 1), as dvdauthor writes it for a title with
+    buttons (tests/test_title_buttons.py)."""
+    if not title.buttons:
+        return tuple(title.pre)
+    return (vm.set_hl_btnn(1 << 10).encode(),) + tuple(title.pre)
+
+
 def _title_buttons(number, title, loaded, part_start):
     """The HLI of the title's buttons: {(part, angle): {VOBU: HLI}}, in the
     VOBUs that play during each stretch (every angle's), shown from the
     stretch's start to its end in the VOB's time (a stretch that began in
     an earlier part from the VOB's start; one that goes on into a later
-    part to the VOB's end; one without an end never ending)."""
+    part to the VOB's end; one without an end never ending). Where two
+    stretches meet inside a VOBU, it carries the one that covers more of
+    it: buttons that change between VOBUs (oncemore starts a VOBU there)
+    are not lost to a picture's difference between a time and the VOBU's
+    start, as in a film title with pulldown."""
     if not title.buttons:
         return {}
     width, height = loaded[0][0][0].sequence[:2]
@@ -768,26 +781,35 @@ def _title_buttons(number, title, loaded, part_start):
         if e1 is None or e1 > s2:
             raise VtsError(f"{w1} and {w2} overlap in time")
     out = {}
-    used = set()
+    touched, used = set(), set()
     for k, part in enumerate(loaded):
         for a, (_, vs, _) in enumerate(part):
             base, vob_end = vs[0].s_ptm, vs[-1].e_ptm
             table = out[(k, a)] = {}
-            for s, e, tb, what in stretches:
-                for i, v in enumerate(vs):
-                    t0 = part_start[k] + v.s_ptm - base
-                    t1 = part_start[k] + v.e_ptm - base
-                    if t1 <= s or e is not None and t0 >= e:
-                        continue
-                    if i in table:
-                        raise VtsError(f"{what} start in the VOBU (part {k + 1}, VOBU {i + 1}) where "
-                                       "the buttons before end: a VOBU carries one set of buttons")
-                    he = 0xFFFFFFFF if e is None else min(base + e - part_start[k], vob_end)
-                    table[i] = tb.hli(base + max(s - part_start[k], 0), he)
-                    used.add(what)
+            for i, v in enumerate(vs):
+                t0 = part_start[k] + v.s_ptm - base
+                t1 = part_start[k] + v.e_ptm - base
+                # (two stretches in a VOBU: the one covering more of it, the
+                # later on a tie; a VOBU carries one set of buttons)
+                best = None
+                for s, e, tb, what in stretches:
+                    cover = min(t1, e if e is not None else t1) - max(t0, s)
+                    if cover > 0:
+                        touched.add(what)
+                        if best is None or cover >= best[0]:
+                            best = (cover, s, e, tb, what)
+                if best is None:
+                    continue
+                _, s, e, tb, what = best
+                he = 0xFFFFFFFF if e is None else min(base + e - part_start[k], vob_end)
+                table[i] = tb.hli(base + max(s - part_start[k], 0), he)
+                used.add(what)
     for _, _, _, what in stretches:
-        if what not in used:
+        if what not in touched:
             raise VtsError(f"{what} start after the title ends")
+        if what not in used:
+            raise VtsError(f"{what} are shown for less of each VOBU they fall in than the buttons "
+                           "beside them: a VOBU carries one set of buttons")
     return out
 
 
@@ -955,7 +977,7 @@ def _write(folder, vts, titles, written, menus, language, pan_scan, letterbox, c
         for name in ("next_pgc", "prev_pgc", "up_pgc"):
             if not 0 <= getattr(t, name) <= len(titles):
                 raise VtsError(f"title {n}: {name} {getattr(t, name)}: the titleset has {len(titles)} program chains")
-    pgcs = [_pgc((t.pre, t.post, t.cell_commands), w, frame, sorted(w.stream.subpictures), t.palette,
+    pgcs = [_pgc((_pre(t), t.post, t.cell_commands), w, frame, sorted(w.stream.subpictures), t.palette,
                  stills=t.stills, uops=t.uops, video=video, links=(t.next_pgc, t.prev_pgc, t.up_pgc))
             for t, w in zip(titles, written)]
     pgci = struct.pack(">HHI", len(pgcs), 0, 0)
