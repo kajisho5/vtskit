@@ -179,7 +179,8 @@ def _subpicture_sync(stream, vs, pos, covered):
 HLI = 0x60                 # the highlight information in the PCI data, to 0x316
 
 
-def fill(data, cells, lbn=0, uops=0, stream=None, hli=None, layout=None, ilvu=None, nsml=None):
+def fill(data, cells, lbn=0, uops=0, stream=None, hli=None, layout=None, ilvu=None, nsml=None,
+         highlights=None):
     """Fill the navigation packs of a VOB in place (a bytearray or a
     writable mmap).
 
@@ -192,7 +193,9 @@ def fill(data, cells, lbn=0, uops=0, stream=None, hli=None, layout=None, ilvu=No
     every navigation pack of that VOB. `ilvu`: {VOBU index: (flags, end,
     next start, next size, [(angle's next unit, size)] * 9)}, the SML_PBI
     and SML_AGLI of a VOBU in or before an interleaved block. `nsml`: {VOBU
-    index: [angle's VOBU] * 9}, the PCI's NSML_AGLI. Returns the VOBUs."""
+    index: [angle's VOBU] * 9}, the PCI's NSML_AGLI. `highlights`: {VOBU
+    index: highlight information}, buttons in some VOBUs only (a title's).
+    Returns the VOBUs."""
     stream = stream or ps.scan(data)
     vs = vobus(stream)
     pos = list(layout) if layout is not None else [lbn + v.start for v in vs]
@@ -232,10 +235,13 @@ def fill(data, cells, lbn=0, uops=0, stream=None, hli=None, layout=None, ilvu=No
                          v.s_ptm, v.e_ptm, 0, int.from_bytes(eltm, "big"))
         if i in nsml:
             struct.pack_into(">9I", pci, 0x3C, *nsml[i])
-        if hli and vob_id in hli:
-            if len(hli[vob_id]) != 0x316 - HLI:
+        h = highlights.get(i) if highlights else None
+        if h is None and hli and vob_id in hli:
+            h = hli[vob_id]
+        if h is not None:
+            if len(h) != 0x316 - HLI:
                 raise VtsError("the highlight information is 0x2B6 bytes")
-            pci[HLI:0x316] = hli[vob_id]
+            pci[HLI:0x316] = h
         dsi = bytearray(0x3FA - 1)
         # (fewer than three reference pictures: the last one's end again,
         # as dvdauthor writes it)
