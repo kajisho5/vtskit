@@ -198,13 +198,14 @@ class Mapped:
 
 
 class Picture:
-    __slots__ = ("type", "start", "end", "pts", "fields", "order")
+    __slots__ = ("type", "start", "end", "pts", "fields", "order", "closed")
 
     def __init__(self, type_, start, pts, order):
         self.type, self.start, self.pts = type_, start, pts
         self.end = None          # sector of the picture's last byte
         self.fields = 2
         self.order = order       # temporal_reference: its place in its group's display order
+        self.closed = None       # the first picture of a group: its header's closed_gop (13818-2)
 
 
 class _Video:
@@ -221,6 +222,7 @@ class _Video:
         self.before = None           # the sector of the byte before the tail
         self.pending_pts = None      # the PTS of the packet the tail's first start code is in
         self.last_sector = None
+        self.gop_closed = None       # the closed_gop of the group header just read
 
     def feed(self, chunk, sector, pts):
         buf = self.tail + chunk
@@ -253,6 +255,7 @@ class _Video:
                                  buf[k + 7] >> 4, buf[k + 7] & 0x0F)
             elif code == _GOP:
                 self.groups.append([])
+                self.gop_closed = bool(buf[k + 7] & 0x40)    # (after the 25-bit time code)
             elif code == _PICTURE:
                 t = "?IPB"[(buf[k + 5] >> 3) & 7]
                 # a packet's PTS belongs to the first picture that starts in it
@@ -263,6 +266,7 @@ class _Video:
                 else:
                     own = None
                 picture = Picture(t, sector_of(k), own, buf[k + 4] << 2 | buf[k + 5] >> 6)
+                picture.closed, self.gop_closed = self.gop_closed, None
                 if not self.groups or t == "I" and self.groups[-1]:
                     self.groups.append([])           # (a group without its header)
                 self.groups[-1].append(picture)

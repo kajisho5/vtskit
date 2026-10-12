@@ -41,12 +41,15 @@ or an Angles block of 2 to 9 streams the viewer switches between. An angle
 block is interleaved (dvdinfo dsi_pkt.html, pgc.html): each angle's VOBUs
 are cut into interleaved units (ILVUs) of the same number of VOBUs, and the
 units take turns on the disc, angle 1's first, then angle 2's, ... then
-angle 1's second; every VOBU's DSI says where its unit ends, where its
-angle's next unit is, and where every angle's next unit is (SML_AGLI);
-every PCI where every angle's VOBU of the same moment is (NSML_AGLI); the
-three VOBUs before a block carry the PREU flags; the block's cells are one
-an angle, marked first, middle and last of an angle block, interleaved,
-and seamless when asked. dvdauthor writes no angles, so none of this is
+angle 1's second; every VOBU's DSI says where its unit ends and where its
+angle's next unit is. A seamless block (the default) is switched at the
+end of a unit: every DSI says where every angle's next unit is (SML_AGLI)
+and every cell is marked "seamless angle linked in DSI"; a block switched
+with a break says instead, in every PCI, where every angle's VOBU of the
+same moment is (NSML_AGLI). Only one of the two is filled: libdvdnav takes
+NSML_AGLI whenever it is there. The three VOBUs before a block carry the
+PREU flags; the block's cells are one an angle, marked first, middle and
+last of an angle block, and interleaved. dvdauthor writes no angles, so none of this is
 checked against it: the structure is checked against the descriptions and
 libdvdnav plays and switches the angles (tests/test_angles.py); a set-top
 player is the check still owed.
@@ -150,6 +153,7 @@ class Cell:
     stc_discontinuity: bool = True   # the first cell of its VOB
     seamless: bool = False  # continues the previous cell without a break
     interleaved: bool = False
+    seamless_angle: bool = False    # an angle block switched at its interleaved units (SML_AGLI)
     last_of_program: bool = True
     segment: tuple = (0, 1)     # (part, stretch of it) the cell plays
 
@@ -161,7 +165,7 @@ class Cell:
             kind = 0x40 if self.angle == 1 else 0xC0 if self.angle == self.angles else 0x80
             kind |= 0x10
         return kind | (0x08 if self.seamless else 0) | (0x04 if self.interleaved else 0) \
-            | (0x02 if self.stc_discontinuity else 0) | (0x01 if self.seamless and self.angle else 0)
+            | (0x02 if self.stc_discontinuity else 0) | (0x01 if self.seamless_angle and self.angle else 0)
 
 
 @dataclass
@@ -509,6 +513,35 @@ def _aligned(loaded, where):
                        f"{len(fs.pictures)} and {len(os_.pictures)} pictures)")
 
 
+def _clean_starts(where, stream, vs, starts):
+    """An angle is switched to at the start of an interleaved unit: the
+    pictures there must not lean on the group before, which is another
+    angle's after the switch. B-pictures coded after the unit's first
+    I-picture but shown before it are predicted from the previous group
+    unless its header says closed_gop (ISO 13818-2); such a stream is
+    refused (ffmpeg's -flags +cgop, or no B-pictures, makes groups that
+    stand alone; oncemore's have no B-pictures)."""
+    pictures = stream.pictures
+    firsts = [p.start for p in pictures]
+    for i in starts:
+        k = bisect.bisect_left(firsts, vs[i].start)
+        if k >= len(pictures) or pictures[k].type != "I":
+            continue
+        head = pictures[k]
+        leading = []
+        for p in pictures[k + 1:]:
+            if p.type != "B":
+                break
+            if p.order < head.order:
+                leading.append(p)
+        if leading and not head.closed:
+            raise VtsError(f"{where}: the group of pictures that starts an interleaved unit "
+                           f"(VOBU {i + 1}) is open: {len(leading)} B-pictures shown before its "
+                           "I-picture lean on the group before, which is another angle's after a "
+                           "switch. Encode the angles with closed groups (ffmpeg -flags +cgop) "
+                           "or without B-pictures")
+
+
 def _title(number, title, offset, vob_id):
     """Read a title's parts, place its chapters, lay its VOBUs on the disc
     (interleaving the angle blocks) and fill their navigation packs:
@@ -597,6 +630,9 @@ def _title(number, title, offset, vob_id):
                 if unit < 1:
                     raise VtsError("an interleaved unit holds at least one VOBU")
                 groups = [range(g, min(g + unit, i1)) for g in range(i0, i1, unit)]
+                for a in range(n_angles):
+                    _clean_starts(f"title {number}, part {k + 1}, angle {a + 1}", part[a][0],
+                                  part[a][1], [rng[0] for rng in groups[1:]])
                 # the three VOBUs before the block: PREU (the first of them
                 # Unit_Start, the last Unit_End), when they are not interleaved
                 before = [p for p in preceding[-3:] if not isinstance(parts[p[0]], Angles)]
@@ -631,9 +667,16 @@ def _title(number, title, offset, vob_id):
                                 nxt_sa, nxt_sz = 0xFFFFFFFF, 0xFFFF
                             else:
                                 nxt_sa, nxt_sz = unit_start[(a, g + 1)] - lay[i], unit_size[(a, g + 1)]
+                            # a seamless block says where every angle's next unit
+                            # is (SML_AGLI) and leaves NSML_AGLI empty; a block
+                            # switched with a break, the other way round. Players
+                            # take the pointers that are there: libdvdnav follows
+                            # NSML_AGLI whenever it is filled, replaying the moment
+                            # it was at, and SML_AGLI otherwise, going on at the
+                            # next unit (tests/test_angles.py)
                             agli = []
                             for b in range(9):
-                                if b >= n_angles:
+                                if b >= n_angles or not block.seamless:
                                     agli.append((0, 0))
                                 elif last_group:
                                     agli.append((0x7FFFFFFF, 0))
@@ -642,7 +685,7 @@ def _title(number, title, offset, vob_id):
                             ilvu_info[(k, a)][i] = (flags, unit_end - lay[i], nxt_sa, nxt_sz, agli)
                             nsml = []
                             for b in range(9):
-                                if b >= n_angles:
+                                if b >= n_angles or block.seamless:
                                     nsml.append(0)
                                 else:
                                     d = layouts[(k, b)][i] - lay[i]
@@ -655,7 +698,8 @@ def _title(number, title, offset, vob_id):
                                       lay[i1 - 1], lay[i1 - 1] + vs[i1 - 1].end - vs[i1 - 1].start,
                                       vs[i0].s_ptm, e, len(programs), a + 1, n_angles,
                                       stc_discontinuity=seg == 1, seamless=block.seamless and seg > 1,
-                                      interleaved=True, segment=(k, seg)))
+                                      interleaved=True, seamless_angle=block.seamless,
+                                      segment=(k, seg)))
         for a in range(n_angles):
             jobs.append((k, a, vob_id + a))
         vob_id += n_angles

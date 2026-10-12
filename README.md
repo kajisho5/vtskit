@@ -68,10 +68,10 @@ play the discs vtskit writes.
 ## Installing
 
 vtskit is one package of plain Python (3.11 or later), with nothing else
-to install. Until it is on PyPI:
+to install:
 
 ```
-pip install git+https://github.com/kajisho5/vtskit
+pip install vtskit
 ```
 
 A release is made by the version: when the version in `pyproject.toml`
@@ -81,8 +81,9 @@ the GitHub release with its tag and publishes to PyPI. Merging the version
 bump is the whole act; a tag `v*` pushed by hand releases the same way.
 PyPI knows this repository and workflow as the project's trusted
 publisher. oncemore does not install vtskit: it
-carries a copy of `vtskit/` as `oncemore/_vendor/vtskit`, updated with its
-`tools/vendor_vtskit.py`.
+carries a copy of each release as `oncemore/_vendor/vtskit`, taken from
+PyPI with its `tools/vendor.py vtskit --pypi <version>` (a pull request
+does it there each day a newer release is out).
 
 ## What is here now
 
@@ -115,9 +116,15 @@ oncemore writing its discs with vtskit.
   libdvdnav a title whose post commands run out plays on into its next
   program chain; dvdauthor writes none of these. A title may be
   several parts in a row, streams and `Angles` blocks of 2 to 9 streams: an
-  angle block is interleaved on the disc, its navigation packs point from
-  each unit to every angle's next, and its cells are marked as an angle
-  block.
+  angle block is interleaved on the disc and its cells are marked as an
+  angle block. A seamless block (the default) is switched at the end of an
+  interleaved unit: its navigation packs point from each unit to every
+  angle's next (SML_AGLI) and its cells say "seamless angle"; a block
+  switched with a break (`seamless=False`) points instead at every angle's
+  VOBU of the same moment (NSML_AGLI). Only one of the two is filled, as
+  players take NSML_AGLI whenever it is there. A stream whose interleaved
+  units start with open groups of pictures (B-pictures leaning on the group
+  before, another angle's after a switch) is refused.
 * `vtskit.subtitles` adds subtitles to a title's program stream, as spumux
   does: each cue a picture of up to four colours placed on the screen and
   shown for a while, as subpicture packs a little before their time.
@@ -163,8 +170,10 @@ its titles and chapters in order under libdvdnav, its commands jumping
 between titles, its menus' buttons lead where they say, and its jumps into
 another titleset's chapters land; a title with an angle block plays and
 switches angles under libdvdnav, every pointer of its navigation packs
-landing on the unit it names (dvdauthor writes no angles, so a set-top
-player is the check still owed)
+landing on the unit it names, and the pictures libdvdnav hands a player
+through a switch, decoded with ffmpeg, are every picture once, in order,
+the new angle from the end of a unit (dvdauthor writes no angles, so a
+set-top player is the check still owed)
 (`python -m unittest discover -s tests -t .`; a test is skipped when a tool
 it needs is missing). oncemore's switch to vtskit (step 4) is merged:
 [oncemore#90](https://github.com/kajisho5/oncemore/pull/90) and
