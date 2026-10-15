@@ -167,7 +167,8 @@ The tests give the same titles to dvdauthor and to vtskit, and the IFO and
 the VOBs must be the same byte for byte: NTSC and PAL, 4:3 and 16:9,
 chapters on and between VOBU starts, two titles in a titleset, AC-3, LPCM
 and MPEG sound with languages, B-pictures, short GOPs, a 40-second title,
-a subtitle track, two titlesets; every command form is the bytes dvdauthor
+a subtitle track, two titlesets and three (whose attributes take the VMG
+a second sector); every command form is the bytes dvdauthor
 compiles for the same statement, and a disc described in its language
 (menus of commands alone, buttons of several commands, cell commands, two
 titlesets) comes out with the same IFOs; for menus, the highlight
