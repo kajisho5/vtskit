@@ -7,8 +7,9 @@ it, TT_SRPT (every title of the disc: its titleset, number there, chapters,
 angles, and where the titleset starts on the disc), VTS_ATRT (a copy of
 each titleset's stream attributes) and, with menus, VMGM_PGCI_UT (one
 language unit), VMGM_C_ADT and VMGM_VOBU_ADMAP. The parental masks and
-the text data are absent. Each table starts at a sector; the BUP is the
-IFO again.
+the text data are absent. Each table starts at a sector and takes as many
+as it needs (VTS_ATRT two from three titlesets on); the BUP is the IFO
+again.
 
 From dvdauthor's output: the VMG takes its IFO, its menu VOB and its BUP
 on the disc, 32 sectors at least, and the first titleset starts right
@@ -92,7 +93,12 @@ def write(folder, titlesets, menus=(), first_play=None, language="en", provider=
     for name, t in order:
         if t is not None:
             ifo_sectors += len(_pad(t)) // SECTOR
-    ifo_sectors += 2         # TT_SRPT and VTS_ATRT below, a sector each (checked)
+    # TT_SRPT and VTS_ATRT, written below once the titlesets' places are
+    # known: 12 bytes a title, and 4 + 8 + 0x300 bytes a titleset (from
+    # three titlesets on, the attributes take a second sector)
+    titles = sum(len(ts.titles) for ts in titlesets)
+    ifo_sectors += -(-(8 + 12 * titles) // SECTOR)
+    ifo_sectors += -(-(8 + (4 + 8 + 0x300) * len(titlesets)) // SECTOR)
     vmg_sectors = max(2 * ifo_sectors + menu_sectors, VMG_SECTORS)
 
     # TT_SRPT: the titles of the disc
@@ -131,7 +137,7 @@ def write(folder, titlesets, menus=(), first_play=None, language="en", provider=
         pointers[name] = sectors
         sectors += len(tables[name]) // SECTOR
     if sectors != ifo_sectors:
-        raise VtsError("the title table or the attributes outgrew a sector")   # (99 titles fit)
+        raise VtsError("the title table or the attributes are not the size counted")
     mat = bytearray(head)
     mat[:12] = b"DVDVIDEO-VMG"
     struct.pack_into(">I", mat, 0x0C, vmg_sectors - 1)

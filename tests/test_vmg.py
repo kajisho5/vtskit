@@ -105,6 +105,23 @@ class TestAgainstDvdauthor(unittest.TestCase):
         self.assertEqual([c[:3] for c in ifo.chapters(ifo.read_folder(mine))],
                          [(1, 1, 1), (1, 1, 2), (2, 1, 1)])
 
+    def test_three_titlesets(self):
+        # VTS_ATRT holds 776 bytes a titleset: three no longer fit in a
+        # sector, and the table goes on into the next (as dvdauthor writes it)
+        paths = [os.path.join(self.tmp, f"{n}.mpg") for n in "abc"]
+        for p in paths:
+            encode(p, seconds=2)
+        theirs, mine = self.same("ntsc", [[Title(p, audio=(Audio("en", 2),))] for p in paths])
+        d = read(os.path.join(mine, "VIDEO_TS.IFO"))
+        tt_srpt, atrt = struct.unpack_from(">I", d, 0xC4)[0], struct.unpack_from(">I", d, 0xD0)[0]
+        self.assertEqual(struct.unpack_from(">H", d, atrt * 2048)[0], 3)
+        self.assertGreater(struct.unpack_from(">I", d, atrt * 2048 + 4)[0], 2048)
+        self.assertEqual([c[:3] for c in ifo.chapters(ifo.read_folder(mine))],
+                         [(1, 1, 1), (2, 1, 1), (3, 1, 1)])
+        if LIBDVDNAV:
+            with dvdnav_sim.DvdSim(mine, LIBDVDNAV) as nav:
+                self.assertEqual(nav.num_titles(), 3)
+
     @unittest.skipUnless(LIBDVDNAV, "needs libdvdnav")
     def test_libdvdnav_plays_a_whole_disc(self):
         # a VIDEO_TS written by vtskit alone: two titlesets, three titles;
