@@ -201,6 +201,9 @@ as `oncemore/_vendor/vtskit`.
 `tests/dvdnav_sim.py`, GPL-3.0 there) and are relicensed here under
 LGPL-3.0-or-later by their author.
 
+`python -m vtskit contract --json` prints the machine-readable contract (the
+AI Video Production OS registry's shape); it is the package's only command.
+
 ## Support
 
 vtskit is free and stays free. If it saves you time, you can support its
