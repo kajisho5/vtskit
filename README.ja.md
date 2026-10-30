@@ -57,6 +57,9 @@ pip install vtskit
 
 `vtskit.ifo` と `tests/dvdnav_sim.py` は [oncemore](https://github.com/kajisho5/oncemore) のもの（`layerbreak.py` と `tests/dvdnav_sim.py`。oncemore では GPL-3.0）で、作者がここでは LGPL-3.0-or-later で再ライセンスしています。
 
+`python -m vtskit contract --json` で機械可読な契約（AI Video Production OS
+レジストリの形）を表示します。パッケージ唯一のコマンドです。
+
 ## 支援する
 
 vtskit は無料で、これからも無料です。役に立ったら [GitHub Sponsors](https://github.com/sponsors/kajisho5)（このリポジトリ上部の **Sponsor** ボタン）から開発を支援できます。不具合の報告も同じくらい助かります：[Issues](https://github.com/kajisho5/vtskit/issues)。
