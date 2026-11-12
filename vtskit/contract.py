@@ -14,6 +14,8 @@ TOOLS = [
      "description": "Write the video manager (VIDEO_TS.IFO, .BUP and the title menu's VOB)"},
     {"tool_id": "vtskit/subtitles", "kind": "python", "python": "vtskit.subtitles.mux", "writes_media": True, "mutates_input": False,
      "description": "Add subpicture subtitle streams to a title's program stream, as spumux does"},
+    {"tool_id": "vtskit/plan", "kind": "python", "python": "vtskit.plan.plan", "writes_media": False, "mutates_input": False,
+     "description": "Plan a long programme's video bitrate on DVD-5 or DVD-9 against a quality floor (or report the shortfall), with a chapter a session from a chapter list"},
 ]
 
 
@@ -27,6 +29,7 @@ def contract():
             {"id": "dvd.titleset", "lifecycle": "EXPERIMENTAL", "tool_id": "vtskit/titleset"},
             {"id": "dvd.video_manager", "lifecycle": "EXPERIMENTAL", "tool_id": "vtskit/vmg"},
             {"id": "dvd.subtitles", "lifecycle": "EXPERIMENTAL", "tool_id": "vtskit/subtitles"},
+            {"id": "dvd.bitrate_plan", "lifecycle": "EXPERIMENTAL", "tool_id": "vtskit/plan"},
         ],
         # No Skill dependencies (ffmpeg-skill is not used).
         "dependencies": [],
@@ -39,7 +42,7 @@ def contract():
             "network access of any kind",
         ],
         "tools": TOOLS,
-        "python_api": "vtskit.titleset, vtskit.vmg, vtskit.subtitles, vtskit.lang, vtskit.ifo",
+        "python_api": "vtskit.titleset, vtskit.vmg, vtskit.subtitles, vtskit.lang, vtskit.ifo, vtskit.plan",
         "execution": {"canonical_invocation": ["python", "-m", "vtskit", "contract", "--json"],
                       "network": False, "shell": False},
     }
