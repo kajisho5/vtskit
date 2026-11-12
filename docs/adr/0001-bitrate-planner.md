@@ -36,7 +36,9 @@ writing nothing:
   still gives the bitrate, marks `meets_floor` false, adds a warning, and
   reports the shortfall: the bytes the disc lacks at the floor, the minutes
   of programme beyond what it holds, and that length (`max_duration`). The
-  caller decides: a second disc, a lower floor, or fewer minutes.
+  caller decides: a second disc, a lower floor, or fewer minutes. A floor
+  above what the stream limit leaves for video beside the sound and
+  subtitles is refused, as no disc could meet it.
 * **Chapters.** A chapter list, a line a session (`H:MM:SS name`, or
   `MM:SS`, `#` for comments), or (start, name) pairs, becomes one chapter a
   session. A first chapter at 0 is added when the list starts later. Starts

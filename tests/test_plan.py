@@ -111,6 +111,12 @@ class TestPlan(unittest.TestCase):
                 plan([0], 3600, disc, **kw)
         with self.assertRaises(VtsError):
             plan([0], 0)
+        # a floor the stream limit cannot carry beside the sound is refused, not a shortfall
+        with self.assertRaisesRegex(VtsError, "stream limit"):
+            plan([0], 3600, "dvd9", floor=9_800_000)
+        for bad in ([-1, 100], [float("nan")]):
+            with self.assertRaisesRegex(VtsError, "before the start"):
+                plan(bad, 3600, "dvd9")
 
 
 if __name__ == "__main__":

@@ -171,6 +171,9 @@ def _sessions(chapters, duration):
         else:
             start, label = c
             out.append(Session(float(start) if not isinstance(start, str) else parse_time(start), label))
+    for s in out:
+        if not math.isfinite(s.start) or s.start < 0:
+            raise VtsError(f"a chapter at {s.start} s, before the start")
     if not out:
         out = [Session(0.0)]
     if out[0].start > 0:
@@ -218,6 +221,9 @@ def _plan(sessions, duration, disc, audio, subtitles, floor, reserve, margin):
     if mux_bitrate(others) >= MAX_MUX:
         raise VtsError("the sound and subtitle streams alone exceed DVD-Video's 10.08 Mbit/s")
     cap = min(MAX_VIDEO, int(payload_bitrate(MAX_MUX) - others))
+    if floor > cap:
+        raise VtsError(f"a floor of {floor / 1e6:.2f} Mbit/s is above the {cap / 1e6:.2f} Mbit/s of video"
+                       " DVD-Video's stream limit leaves beside the sound and subtitles")
     video = min(cap, int(payload_bitrate(room * 8 / duration) - others))
     at_floor = mux_bitrate(floor + others)
     max_duration = room * 8 / at_floor
