@@ -23,7 +23,7 @@ Not reachable from the agent; encodes with ffmpeg directly.
 
 - [x] **1. (optional) Contract in the OS schema** — skill_id, version, provides[]
   - Done when: validates against the OS schema
-- [ ] **2. Bitrate planner and session chapters** — 1-4 h programmes on DVD-5 / DVD-9 with a stated quality floor and a warning below it, chapters per session from a chapter list. Field review 2026-11-05 (Velisa ROADMAP, third round)
+- [x] **2. Bitrate planner and session chapters** — 1-4 h programmes on DVD-5 / DVD-9 with a stated quality floor and a warning below it, chapters per session from a chapter list. Field review 2026-11-05 (Velisa ROADMAP, third round) ([#41](https://github.com/kajisho5/vtskit/pull/41))
   - なぜ要るか：DVD での記録納品を求める主催者に、収まるかどうかを先に答えられる
   - Done when: a 3 h chapter list plans on DVD-9 or reports the shortfall
 

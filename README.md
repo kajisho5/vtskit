@@ -160,6 +160,16 @@ oncemore writing its discs with vtskit.
   the program stream for both.
 * `vtskit.ifo` reads where each chapter of each title starts, as a sector of
   the disc, from the IFO files.
+* `vtskit.plan` plans a long programme (a day of sessions, 1 to 4 hours)
+  on one disc before it is encoded: from a chapter list, a line a session
+  ("1:05:00 Panel"), and the programme's length, it gives the average video
+  bitrate on DVD-5 or DVD-9 (DVD-5 when it is enough), whether that is at
+  or above a quality floor (3.5 Mbit/s unless another is given) and, when
+  it is not, a warning with the shortfall in bytes and in minutes, and the
+  chapters, one a session, as the times a `Title` takes. Sound tracks,
+  subtitles, a reserve for the file system and menus, a safety margin, the
+  navigation packs and the pack headers are counted; the reasons are in
+  [docs/adr/0001-bitrate-planner.md](docs/adr/0001-bitrate-planner.md).
 * `tests/dvdnav_sim.py` plays a disc with libdvdnav through ctypes: titles,
   chapters, menus and buttons, sound and subtitle tracks, and angles.
 

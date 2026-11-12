@@ -17,6 +17,9 @@ subtitles and angles, and dvdauthor's command language:
   the program stream for both).
 * `vtskit.ifo`: the chapters of a disc and where they start, read from its
   IFO files.
+* `vtskit.plan`: a programme's video bitrate on DVD-5 or DVD-9 against a
+  quality floor, or how far it falls short, and its chapters, one a
+  session, from a chapter list.
 """
 
 from .errors import VtsError
