@@ -214,6 +214,11 @@ LGPL-3.0-or-later by their author.
 `python -m vtskit contract --json` prints the machine-readable contract (the
 AI Video Production OS registry's shape); it is the package's only command.
 
+`contract/contract.json` is that contract committed as a file (the `contract --json` output,
+unchanged), so any release's contract is `git show vX.Y.Z:contract/contract.json`, with nothing
+installed or run. Regenerate it with `python contract/generate.py` after a contract change or a
+version bump; a unit test fails when it is stale.
+
 ## Support
 
 vtskit is free and stays free. If it saves you time, you can support its
