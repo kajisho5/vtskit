@@ -204,17 +204,22 @@ def plan(chapters, duration, disc="auto", *, audio=DEFAULT_AUDIO, audio_tracks=1
         raise VtsError(f"a floor above {MAX_VIDEO / 1e6} Mbit/s cannot be met on DVD-Video")
     sessions = _sessions(chapters, duration)
     if disc == "auto":
-        p = _plan(sessions, duration, DISCS["dvd5"], audio * audio_tracks, subtitles, floor, reserve, margin)
-        if p.meets_floor:
-            return p
+        if _room(DISCS["dvd5"], reserve, margin) > 0:   # a reserve that fills a DVD-5 leaves DVD-9 to try
+            p = _plan(sessions, duration, DISCS["dvd5"], audio * audio_tracks, subtitles, floor, reserve, margin)
+            if p.meets_floor:
+                return p
         disc = "dvd9"
     if disc not in DISCS:
         raise VtsError(f"no disc {disc!r}; one of {', '.join(DISCS)} or auto")
     return _plan(sessions, duration, DISCS[disc], audio * audio_tracks, subtitles, floor, reserve, margin)
 
 
+def _room(disc, reserve, margin):
+    return (disc.bytes - reserve) * (1 - margin)
+
+
 def _plan(sessions, duration, disc, audio, subtitles, floor, reserve, margin):
-    room = (disc.bytes - reserve) * (1 - margin)
+    room = _room(disc, reserve, margin)
     if room <= 0:
         raise VtsError(f"the reserve leaves nothing of {disc.name}")
     others = audio + subtitles
