@@ -103,6 +103,13 @@ class TestPlan(unittest.TestCase):
             with self.assertRaisesRegex(VtsError, msg):
                 plan(bad, 7200, "dvd9")
 
+    def test_auto_skips_a_dvd5_the_reserve_fills(self):
+        # a reserve as large as a DVD-5 is not an error in auto: DVD-9 still has room
+        p = plan([0], 3600, "auto", reserve=DISCS["dvd5"].bytes)
+        self.assertEqual(p.disc.name, "DVD-9")
+        with self.assertRaisesRegex(VtsError, "the reserve leaves nothing of DVD-9"):
+            plan([0], 3600, "auto", reserve=DISCS["dvd9"].bytes)
+
     def test_bad_arguments(self):
         for kw in ({"disc": "bd25"}, {"floor": 0}, {"floor": 12_000_000}, {"audio": -1},
                    {"margin": 1}, {"reserve": DISCS["dvd5"].bytes}, {"audio": 6_000_000, "audio_tracks": 2}):
